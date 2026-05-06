@@ -20,6 +20,71 @@ struct ContentView: View {
             .padding(.horizontal, 20)
             .id(serialManager.isConnected)
             
+            VStack(spacing: 12) {
+                // MARK: - Calibration & Strength Dashboard
+                // Displays live baseline/MVC values, current strength %, and TENS output level.
+                HStack(spacing: 16) {
+                    Group {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Baseline")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(serialManager.baselineMV != nil ? String(format: "%.3f mV", serialManager.baselineMV!) : "--")
+                                .font(.headline)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("MVC")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(serialManager.mvcMV != nil ? String(format: "%.3f mV", serialManager.mvcMV!) : "--")
+                                .font(.headline)
+                        }
+                    }
+                    Spacer()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Strength")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.0f%%", serialManager.normalizedStrength * 100))
+                            .font(.headline)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("TENS")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.3f", serialManager.tensOutput))
+                            .font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(12)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                
+                // MARK: - Calibration & TENS Control Buttons
+                // Baseline: capture 3-5 seconds of quiet EMG
+                // MVC: capture 2-3 seconds of strong flex
+                // TENS: toggle TENS output on/off
+                HStack(spacing: 12) {
+                    Button(action: { serialManager.toggleBaselineCalibration() }) {
+                        Text(serialManager.calibrationMode == .baseline ? "Stop Baseline" : "Baseline")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button(action: { serialManager.toggleMVCCalibration() }) {
+                        Text(serialManager.calibrationMode == .mvc ? "Stop MVC" : "MVC")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button(action: { serialManager.toggleTensEnabled() }) {
+                        Text(serialManager.isTensEnabled ? "TENS On" : "TENS Off")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(serialManager.isTensEnabled ? .green : .secondary)
+                }
+            }
+            .padding(.horizontal, 20)
+            
             Spacer()
             
             if !serialManager.isConsolePoppedOut {
@@ -112,9 +177,10 @@ struct ContentView: View {
                 .help("Recalibrate baseline")
                 Spacer()
                 Button(action: { serialManager.toggleRecording() }) {
+                    let recordText = serialManager.isRecording ? serialManager.recordingTime : "Record"
                     HStack(spacing: 8) {
                         Image(systemName: serialManager.isRecording ? "stop.circle.fill" : "record.circle")
-                        Text(serialManager.isRecording ? serialManager.recordingTime : "Record")
+                        Text(recordText)
                             .padding(.trailing, 5)
                     }
                     .foregroundStyle(serialManager.isRecording ? .red : .primary)
@@ -125,10 +191,7 @@ struct ContentView: View {
         }
         .navigationTitle("Tandem")
         .navigationSubtitle(
-            Text(Image(systemName: "circle.fill"))
-                .foregroundColor(serialManager.isConnected ? .green : .red)
-                .font(.system(size: 8)) +
-            Text(" \(serialManager.isConnected ? "Connected" : "Disconnected")")
+            Text("\(Image(systemName: "circle.fill").foregroundColor(serialManager.isConnected ? .green : .red).font(.system(size: 8))) \(serialManager.isConnected ? "Connected" : "Disconnected")")
         )
     }
 }
