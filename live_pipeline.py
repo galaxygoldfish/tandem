@@ -10,23 +10,31 @@ Usage:
 Find your ports: ls /dev/tty.*
 """
 
+### COMMAND TO RUN IN TERMINAL: python3 live_pipeline.py --emg /dev/tty.usbmodem1101 --dry-run
+
 import sys
 import time
 import argparse
 import collections
 import configparser
 import threading
+import tty
+import termios
 sys.path.insert(0, "../openEMSstim/apps/python")
 
 import serial
-from pyEMS.EMSCommand import ems_command
+try:
+    from pyEMS.EMSCommand import ems_command
+except ModuleNotFoundError:
+    def ems_command(channel, intensity, duration):
+        return f"CH{channel} intensity={intensity} duration={duration}ms"
 
 CALIBRATION_FILE  = "calibration.ems"
 EMG_BAUD          = 115200
 EMS_BAUD          = 19200
 TO_MILLIVOLTS     = 0.00543
 ENVELOPE_WINDOW   = 20
-BASELINE_ALPHA    = 0.005
+BASELINE_ALPHA    = 0.00001
 SENSORY_THRESHOLD = 0.15
 RAMP_STEP         = 5
 DEFAULT_DURATION  = 500
@@ -42,7 +50,7 @@ def load_calibration(filepath):
 
 class EMGProcessor:
     def __init__(self):
-        self.dynamic_baseline = 300.0
+        self.dynamic_baseline = None
         self.envelope_buffer  = collections.deque(maxlen=ENVELOPE_WINDOW)
         self.baseline_ref     = None
         self.mvc_ref          = None
@@ -52,7 +60,7 @@ class EMGProcessor:
     def start_baseline(self):
         self.cal_samples = []
         self.mode = "baseline"
-        print("\n[CAL] Baseline started — relax arm completely for 3-5 seconds, then press Enter")
+        print("\n[CAL] Baseline started — relax arm completely for 3-5 seconds, then press b again")
 
     def stop_baseline(self):
         if self.cal_samples:
@@ -65,7 +73,7 @@ class EMGProcessor:
     def start_mvc(self):
         self.cal_samples = []
         self.mode = "mvc"
-        print("\n[CAL] MVC started — flex hard for 2-3 seconds, then press Enter")
+        print("\n[CAL] MVC started — flex hard for 2-3 seconds, then press m again")
 
     def stop_mvc(self):
         if self.cal_samples:
@@ -73,16 +81,23 @@ class EMGProcessor:
             idx = int(0.95 * len(sorted_s))
             self.mvc_ref = sorted_s[min(idx, len(sorted_s)-1)]
             print(f"[CAL] MVC set: {self.mvc_ref:.5f} mV ({len(self.cal_samples)} samples)")
+            if self.baseline_ref is not None and self.mvc_ref <= self.baseline_ref:
+                print(f"[CAL] WARNING: MVC ({self.mvc_ref:.5f}) <= baseline ({self.baseline_ref:.5f})")
+                print("[CAL] Signal may not have settled. Wait ~5s, then redo: press b (relax), b, m (flex hard), m")
         else:
             print("[CAL] No samples collected")
         self.mode = "live"
 
     def process(self, raw_adc):
+        if self.dynamic_baseline is None:
+            self.dynamic_baseline = raw_adc
         self.dynamic_baseline = (raw_adc * BASELINE_ALPHA) + (self.dynamic_baseline * (1 - BASELINE_ALPHA))
         centered = raw_adc - self.dynamic_baseline
         abs_mv = abs(centered * TO_MILLIVOLTS)
         if self.mode in ("baseline", "mvc"):
             self.cal_samples.append(abs_mv)
+        if not self.is_calibrated():
+            return abs_mv, 0.0
         self.envelope_buffer.append(abs_mv)
         envelope = sum(self.envelope_buffer) / len(self.envelope_buffer)
         normalized = self._normalize(envelope)
@@ -119,8 +134,12 @@ def activation_to_command(activation_norm, channel, cal, duration=DEFAULT_DURATI
 def main():
     parser = argparse.ArgumentParser(description="Tandem live EMG-to-TENS pipeline")
     parser.add_argument("--emg", required=True, help="Serial port for Spikerbox EMG Arduino")
-    parser.add_argument("--ems", required=True, help="Serial port for openEMSstim board")
+    parser.add_argument("--ems", required=False, help="Serial port for openEMSstim board")
     parser.add_argument("--channel", type=int, default=1, choices=[1,2], help="EMS channel (default: 1)")
+
+    ## CHANGE WHEN WE ACTUALLY USE PHYSICAL EMS STIM. RN WE JUST ARE LOOKING AT COMMANDS
+    ## WOULD BE SENT, WITHOUT USING THE ACTUAL EMS PORT
+    parser.add_argument("--dry-run", action="store_true", help="Skip EMS board — print commands instead of sending")
     args = parser.parse_args()
 
     cal = load_calibration(CALIBRATION_FILE)
@@ -131,15 +150,20 @@ def main():
     time.sleep(2)
     print("Spikerbox connected.")
 
-    print(f"Connecting to openEMSstim on {args.ems}...")
-    ems_port = serial.Serial(args.ems, EMS_BAUD, timeout=1)
-    print("Waiting 10s for openEMSstim board to initialize...")
-    time.sleep(10)
-    print("openEMSstim ready.")
+    if args.dry_run:
+        ems_port = None
+        print("DRY RUN — EMS commands will be printed, not sent.")
+    else:
+        print(f"Connecting to openEMSstim on {args.ems}...")
+        ems_port = serial.Serial(args.ems, EMS_BAUD, timeout=1)
+        print("Waiting 10s for openEMSstim board to initialize...")
+        time.sleep(10)
+        print("openEMSstim ready.")
 
     processor = EMGProcessor()
     data_buffer = ""
     last_tens_time = 0.0
+
 
     print("\n" + "="*55)
     print("TANDEM LIVE PIPELINE")
@@ -150,23 +174,33 @@ def main():
     print("="*55)
     print("\nStart with baseline (press b), then MVC (press m)\n")
 
+    def getch():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
     def input_listener():
         while True:
-            key = input()
-            if key.strip() == "b":
+            key = getch()
+            if key == "b":
                 if processor.mode == "baseline":
                     processor.stop_baseline()
                 else:
                     processor.start_baseline()
-            elif key.strip() == "m":
+            elif key == "m":
                 if processor.mode == "mvc":
                     processor.stop_mvc()
                 else:
                     processor.start_mvc()
-            elif key.strip() == "q":
+            elif key in ("q", "\x03"):
                 print("\nQuitting...")
                 emg_port.close()
-                ems_port.close()
+                if ems_port:
+                    ems_port.close()
                 sys.exit(0)
 
     threading.Thread(target=input_listener, daemon=True).start()
@@ -187,24 +221,28 @@ def main():
                     raw_adc = float(clean)
                 except ValueError:
                     continue
-                envelope, normalized = processor.process(raw_adc)
+                raw_mv, normalized = processor.process(raw_adc)
                 if not processor.is_calibrated():
+                    print(f"  raw={raw_mv:.5f} mV", end="\r")
                     continue
+                envelope = raw_mv
                 now = time.time()
                 if now - last_tens_time < TENS_INTERVAL:
                     continue
                 last_tens_time = now
                 cmd = activation_to_command(normalized, args.channel, cal)
                 if cmd:
-                    ems_port.write(cmd.encode("utf-8"))
-                    print(f"  norm={normalized:.3f}  cmd={cmd}")
+                    if ems_port:
+                        ems_port.write(cmd.encode("utf-8"))
+                    print(f"  env={envelope:.5f}  norm={normalized:.3f}  cmd={cmd}")
                 else:
-                    print(f"  norm={normalized:.3f}  NO STIM", end="\r")
+                    print(f"  env={envelope:.5f}  norm={normalized:.3f}  NO STIM")
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
         emg_port.close()
-        ems_port.close()
+        if ems_port:
+            ems_port.close()
 
 if __name__ == "__main__":
     main()
