@@ -12,6 +12,9 @@ Find your ports: ls /dev/tty.*
 
 ### COMMAND TO RUN IN TERMINAL: python3 live_pipeline.py --emg /dev/tty.usbmodem1101 --dry-run
 
+# Standard EMG pipeline is: 
+# raw ADC → mV → rectify → envelope → calibrate → normalize → stim
+
 import sys
 import time
 import argparse
@@ -94,12 +97,10 @@ class EMGProcessor:
         self.dynamic_baseline = (raw_adc * BASELINE_ALPHA) + (self.dynamic_baseline * (1 - BASELINE_ALPHA))
         centered = raw_adc - self.dynamic_baseline
         abs_mv = abs(centered * TO_MILLIVOLTS)
-        if self.mode in ("baseline", "mvc"):
-            self.cal_samples.append(abs_mv)
-        if not self.is_calibrated():
-            return abs_mv, 0.0
         self.envelope_buffer.append(abs_mv)
         envelope = sum(self.envelope_buffer) / len(self.envelope_buffer)
+        if self.mode in ("baseline", "mvc"):
+            self.cal_samples.append(envelope)
         normalized = self._normalize(envelope)
         return envelope, normalized
 
@@ -221,11 +222,10 @@ def main():
                     raw_adc = float(clean)
                 except ValueError:
                     continue
-                raw_mv, normalized = processor.process(raw_adc)
+                envelope, normalized = processor.process(raw_adc)
                 if not processor.is_calibrated():
-                    print(f"  raw={raw_mv:.5f} mV", end="\r")
+                    print(f"  env={envelope:.5f} mV", end="\r")
                     continue
-                envelope = raw_mv
                 now = time.time()
                 if now - last_tens_time < TENS_INTERVAL:
                     continue
