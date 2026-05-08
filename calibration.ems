@@ -1,6 +1,6 @@
 [intensity]
-channel1: 80
-channel2: 90
+channel1: 30
+channel2: 30
 
 [presets]
 max: 100 
