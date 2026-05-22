@@ -1,0 +1,47 @@
+import SwiftUI
+
+struct WelcomeView: View {
+    var onStart: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image("TandemLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 120)
+            Text("Welcome to Tandem")
+                .font(.largeTitle.bold())
+                .padding(.top, 30)
+            Text("A human to human interface for naturalistic communication of motor movements tailored to physical therapy contexts")
+                .font(.default)
+                .frame(maxWidth: 550)
+                .multilineTextAlignment(.center)
+            Button(action: onStart) {
+                HStack {
+                    Text("Start")
+                        .padding(.leading, 10)
+                    Image(systemName: "arrow.right")
+                        .padding(.leading, 10)
+                        .padding(.vertical, 10)
+                        .padding(.trailing, 10)
+                }
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+            .padding(.top, 30)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .navigationTitle("Tandem")
+        .toolbar(removing: .title)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Color.clear.frame(height: 40)
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
+    }
+}
