@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct ContentView: View {
+struct DevelopmentView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = false
     @Environment(\.openWindow) private var openWindow

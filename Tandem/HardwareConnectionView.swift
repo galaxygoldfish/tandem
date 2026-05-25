@@ -4,6 +4,7 @@ import ORSSerial
 struct HardwareConnectionView: View {
     @EnvironmentObject var serialManager: SerialManager
     var onContinue: () -> Void
+    var onBack: () -> Void
 
     // TENS connection isn't implemented yet — hardcoded until it is.
     private let isTensConnected = false
@@ -64,6 +65,11 @@ struct HardwareConnectionView: View {
         .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                }
+            }
             ToolbarItem(placement: .principal) {
                 Color.clear.frame(height: 40)
             }

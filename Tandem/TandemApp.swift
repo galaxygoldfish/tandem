@@ -4,7 +4,9 @@ import ORSSerial
 enum AppFlow {
     case welcome
     case connect
-    case main
+    case exerciseSelect
+    case therapist(ExerciseSelectionView.Exercise)
+    case developer
 }
 
 @main
@@ -25,6 +27,13 @@ struct TandemApp: App {
         }
         .windowToolbarStyle(.unified(showsTitle: true))
 
+        WindowGroup(id: "patient-window") {
+            PatientView()
+                .environmentObject(serialManager)
+                .frame(minWidth: 500, minHeight: 500)
+        }
+        .windowToolbarStyle(.unified(showsTitle: true))
+
         WindowGroup(id: "console-window") {
             StandaloneConsoleView()
                 .environmentObject(serialManager)
@@ -38,9 +47,23 @@ struct TandemApp: App {
         case .welcome:
             WelcomeView(onStart: { flow = .connect })
         case .connect:
-            HardwareConnectionView(onContinue: { flow = .main })
-        case .main:
-            ContentView()
+            HardwareConnectionView(
+                onContinue: { flow = .exerciseSelect },
+                onBack: { flow = .welcome }
+            )
+        case .exerciseSelect:
+            ExerciseSelectionView(
+                onSelect: { flow = .therapist($0) },
+                onDeveloper: { flow = .developer },
+                onBack: { flow = .connect }
+            )
+        case .therapist(let exercise):
+            TherapistView(
+                exercise: exercise,
+                onBack: { flow = .exerciseSelect }
+            )
+        case .developer:
+            DevelopmentView()
         }
     }
 }
