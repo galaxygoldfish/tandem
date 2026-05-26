@@ -32,6 +32,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var isRecording: Bool = false
     @Published var recordingTime: String = "00:00"
     @Published var isConsolePoppedOut: Bool = false
+    /// Set by the therapist when calibration is complete — patient observes this to advance.
+    @Published var calibrationCompleted: Bool = false
     
     // MARK: - EMG Processing & Calibration (NEW)
     /// Live normalized strength from EMG (0 = rest, 1 = max contraction).

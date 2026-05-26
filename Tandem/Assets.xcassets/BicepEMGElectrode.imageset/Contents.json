@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "bicep-emg-electrode.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
