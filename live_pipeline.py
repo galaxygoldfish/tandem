@@ -11,9 +11,10 @@ Find your ports: ls /dev/tty.*
 """
 
 ### COMMAND TO RUN IN TERMINAL: python3 live_pipeline.py --emg /dev/tty.usbmodem1101 --dry-run
+## (TO JUST SEE RAW mV VALUE: python3 live_pipeline.py --emg /dev/tty.usbmodem1101 --dry-run --raw)
 
-# Standard EMG pipeline is: 
-# raw ADC → mV → rectify → envelope → calibrate → normalize → stim
+# Standard EMG pipeline is:
+# raw ADC → dynamic baseline → rectify → mV → envelope → calibrate → normalize → stim
 
 import sys
 import time
@@ -23,6 +24,7 @@ import configparser
 import threading
 import tty
 import termios
+import csv
 sys.path.insert(0, "../openEMSstim/apps/python")
 
 import serial
@@ -35,13 +37,18 @@ except ModuleNotFoundError:
 CALIBRATION_FILE  = "calibration.ems"
 EMG_BAUD          = 115200
 EMS_BAUD          = 19200
-TO_MILLIVOLTS     = 0.00543
+TO_MILLIVOLTS     = 0.00815  # 5000mV / 1023 / 600x gain (SpikerShield)
 ENVELOPE_WINDOW   = 20
-BASELINE_ALPHA    = 0.00001
+BASELINE_ALPHA       = 0.0001
+BASELINE_ALPHA_FAST  = 0.05    # used for first BASELINE_WARMUP_SAMPLES to snap to true resting level asap
+BASELINE_WARMUP_SAMPLES = 500
+# no command to TENS sent if activation drops below 0.05 (5% of calibrated range)
+# TENS command is sent only once envelope rises at least 15% of the way from resting state to MVC
 SENSORY_THRESHOLD = 0.15
 RAMP_STEP         = 5
-DEFAULT_DURATION  = 500
-TENS_INTERVAL     = 0.1
+DEFAULT_DURATION  = 150 # stim stays continous while muscle is active but stops within 150 ms of dropping below threshold
+TENS_INTERVAL     = 0.1 # commands to TENS go out every 100 ms
+
 
 def load_calibration(filepath):
     config = configparser.ConfigParser()
@@ -54,6 +61,7 @@ def load_calibration(filepath):
 class EMGProcessor:
     def __init__(self):
         self.dynamic_baseline = None
+        self.warmup_count     = 0
         self.envelope_buffer  = collections.deque(maxlen=ENVELOPE_WINDOW)
         self.baseline_ref     = None
         self.mvc_ref          = None
@@ -70,7 +78,7 @@ class EMGProcessor:
             self.baseline_ref = sum(self.cal_samples) / len(self.cal_samples)
             print(f"[CAL] Baseline set: {self.baseline_ref:.5f} mV ({len(self.cal_samples)} samples)")
         else:
-            print("[CAL] No samples collected")
+            print(f"[CAL] No samples collected — serial data may not be flowing")
         self.mode = "live"
 
     def start_mvc(self):
@@ -94,7 +102,9 @@ class EMGProcessor:
     def process(self, raw_adc):
         if self.dynamic_baseline is None:
             self.dynamic_baseline = raw_adc
-        self.dynamic_baseline = (raw_adc * BASELINE_ALPHA) + (self.dynamic_baseline * (1 - BASELINE_ALPHA))
+        self.warmup_count += 1
+        alpha = BASELINE_ALPHA_FAST if self.warmup_count < BASELINE_WARMUP_SAMPLES else BASELINE_ALPHA
+        self.dynamic_baseline = (raw_adc * alpha) + (self.dynamic_baseline * (1 - alpha))
         centered = raw_adc - self.dynamic_baseline
         abs_mv = abs(centered * TO_MILLIVOLTS)
         self.envelope_buffer.append(abs_mv)
@@ -141,6 +151,7 @@ def main():
     ## CHANGE WHEN WE ACTUALLY USE PHYSICAL EMS STIM. RN WE JUST ARE LOOKING AT COMMANDS
     ## WOULD BE SENT, WITHOUT USING THE ACTUAL EMS PORT
     parser.add_argument("--dry-run", action="store_true", help="Skip EMS board — print commands instead of sending")
+    parser.add_argument("--raw", action="store_true", help="Print raw ADC→mV values with no baseline correction or envelope")
     args = parser.parse_args()
 
     cal = load_calibration(CALIBRATION_FILE)
@@ -164,6 +175,8 @@ def main():
     processor = EMGProcessor()
     data_buffer = ""
     last_tens_time = 0.0
+    session_log = []
+    session_start = time.time()
 
 
     print("\n" + "="*55)
@@ -202,6 +215,13 @@ def main():
                 emg_port.close()
                 if ems_port:
                     ems_port.close()
+                if session_log:
+                    fname = f"session_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+                    with open(fname, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["time_s", "envelope_mV", "activation", "intensity"])
+                        writer.writerows(session_log)
+                    print(f"Session saved to {fname}")
                 sys.exit(0)
 
     threading.Thread(target=input_listener, daemon=True).start()
@@ -222,21 +242,26 @@ def main():
                     raw_adc = float(clean)
                 except ValueError:
                     continue
+                if args.raw:
+                    print(f"  RAW: {raw_adc * TO_MILLIVOLTS:.4f} mV", end="\r")
+                    continue
                 envelope, normalized = processor.process(raw_adc)
                 if not processor.is_calibrated():
-                    print(f"  env={envelope:.5f} mV", end="\r")
+                    print(f"  EMG: {envelope:.4f} mV  (calibrate first)", end="\r")
                     continue
                 now = time.time()
                 if now - last_tens_time < TENS_INTERVAL:
                     continue
                 last_tens_time = now
                 cmd = activation_to_command(normalized, args.channel, cal)
+                intensity = _last_intensity[args.channel]
+                session_log.append([round(now - session_start, 3), round(envelope, 5), round(normalized, 4), intensity])
                 if cmd:
                     if ems_port:
                         ems_port.write(cmd.encode("utf-8"))
-                    print(f"  env={envelope:.5f}  norm={normalized:.3f}  cmd={cmd}")
+                    print(f"  EMG: {envelope:.4f} mV  activation: {normalized:.0%}  → {cmd}")
                 else:
-                    print(f"  env={envelope:.5f}  norm={normalized:.3f}  NO STIM")
+                    print(f"  EMG: {envelope:.4f} mV  activation: {normalized:.0%}")
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
