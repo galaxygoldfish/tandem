@@ -1,11 +1,9 @@
 import sys
 sys.path.insert(0, "../openEMSstim/apps/python")
-
-import csv
-import configparser
+import csv, configparser
 from pyEMS.EMSCommand import ems_command
 
-CALIBRATION_FILE = "../openEMSstim/apps/python/calibration.ems"
+CALIBRATION_FILE = "calibration.ems"
 SENSORY_THRESHOLD = 0.15
 RAMP_STEP = 5
 DEFAULT_DURATION = 500
@@ -37,14 +35,13 @@ def activation_to_command(activation_norm, channel, cal, duration=DEFAULT_DURATI
 
 cal = load_calibration(CALIBRATION_FILE)
 print(f"Calibration: {cal}")
-print(f"\n{'timestamp_ms':>14}  {'normalized':>10}  {'command':>20}")
-print("-" * 50)
+print(f"\n{'time_s':>10}  {'activation':>10}  {'command':>20}")
+print("-" * 46)
 
-with open("sample_flex.csv") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        t = int(row["timestamp_ms"])
+with open("session_20260526_004927.csv") as f:
+    for row in csv.DictReader(f):
+        t = float(row["time_s"])
         norm = float(row["activation"])
         cmd = activation_to_command(norm, 1, cal)
         if cmd:
-            print(f"{t:>14}  {norm:>10.4f}  {cmd:>20}")
+            print(f"{t:>10.3f}  {norm:>10.4f}  {cmd:>20}")
