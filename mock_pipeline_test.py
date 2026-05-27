@@ -44,7 +44,7 @@ with open("sample_flex.csv") as f:
     reader = csv.DictReader(f)
     for row in reader:
         t = int(row["timestamp_ms"])
-        norm = float(row["normalized_strength"])
+        norm = float(row["activation"])
         cmd = activation_to_command(norm, 1, cal)
         if cmd:
             print(f"{t:>14}  {norm:>10.4f}  {cmd:>20}")
