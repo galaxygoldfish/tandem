@@ -56,10 +56,12 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var lastTensSent = Date(timeIntervalSince1970: 0)  // Throttle TENS commands
     
      // MARK: - Signal Processing Constants
-    @Published var dynamicBaseline: Double = 300.0  // Slow drift correction baseline
+    @Published var dynamicBaseline: Double = -1.0  // -1 = uninitialized; set to first sample on arrival
+    private var warmupCount: Int = 0
     private var smoothedValue: Double = 0.0  // Exponentially smoothed display value
     private let signalSmoothing: Double = 0.15  // Waveform display smoothing
-    private let baselineSmoothing: Double = 0.005  // Drift correction alpha
+    private let baselineAlphaFast: Double = 0.05    // Fast convergence for first 500 samples
+    private let baselineAlphaSlow: Double = 0.0001  // Slow drift tracking after warmup (τ ≈ 10s at 1kHz)
     private let gainMultiplier: Double = 500.0  // Visual scaling for plot
     
     // MARK: - Calibration & Envelope Buffers
@@ -89,12 +91,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     }
     
     func recalibrate() {
+        dynamicBaseline = -1.0
+        warmupCount = 0
+        envelopeBuffer.removeAll()
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
             self.plotData = Array(repeating: 0.0, count: 250)
             self.normalizedStrength = 0.0
             self.tensOutput = 0.0
-            self.envelopeBuffer.removeAll()
         }
     }
 
@@ -285,34 +289,37 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    // Conversion factor for SpikerShield (5V ref, 10-bit, 900x gain)
-    private let toMillivolts: Double = 0.00543
+    // Conversion factor for SpikerShield (5V ref, 10-bit, 600x gain)
+    private let toMillivolts: Double = 0.00815
 
     private func processNewValue(_ value: Double) {
-        dynamicBaseline = (value * baselineSmoothing) + (dynamicBaseline * (1 - baselineSmoothing))
-        
+        if dynamicBaseline < 0 { dynamicBaseline = value }
+        warmupCount += 1
+        let alpha = warmupCount < 500 ? baselineAlphaFast : baselineAlphaSlow
+        dynamicBaseline = (value * alpha) + (dynamicBaseline * (1 - alpha))
+
         if isPaused { return }
-        
+
         // Calculate the raw difference from baseline
         let centeredRaw = value - dynamicBaseline
-        
+
         // Convert that difference to millivolts
         let centeredMV = centeredRaw * toMillivolts
 
         // Take absolute value (rectify) the centered EMG.
         let absMV = abs(centeredMV)
-        
-        // During calibration, collect samples for baseline or MVC computation.
-        if calibrationMode == .baseline {
-            baselineSamples.append(absMV)
-        } else if calibrationMode == .mvc {
-            mvcSamples.append(absMV)
-        }
 
-        // Maintain a short envelope buffer (~20 samples, 50 ms @ 1 kHz) for smoothing.
+        // Maintain a short envelope buffer (~20 samples) for smoothing.
         envelopeBuffer.append(absMV)
         if envelopeBuffer.count > 20 { envelopeBuffer.removeFirst() }
         let envelope = envelopeBuffer.reduce(0, +) / Double(envelopeBuffer.count)
+
+        // During calibration, collect envelope samples for baseline or MVC computation.
+        if calibrationMode == .baseline {
+            baselineSamples.append(envelope)
+        } else if calibrationMode == .mvc {
+            mvcSamples.append(envelope)
+        }
 
         // Scale for visual display (exponential smoothing for plot).
         let amplified = envelope * (gainMultiplier * 20)
@@ -385,7 +392,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
     
-    private let rawToMillivolts: Double = (5.0 / 1023.0 / 900.0) * 1000.0 // approx 0.00543
+    private let rawToMillivolts: Double = (5.0 / 1023.0 / 600.0) * 1000.0 // approx 0.00815
     
     func serialPort(_ serialPort: ORSSerialPort, didReceive data: Data) {
         dataBuffer.append(data)
