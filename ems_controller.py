@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import sys
-sys.path.insert(0, "apps/python")
+sys.path.insert(0, "../openEMSstim/apps/python")
 
 import configparser
 from pyEMS.EMSCommand import ems_command
 
-CALIBRATION_FILE  = "apps/python/calibration.ems"
+CALIBRATION_FILE  = "calibration.ems"
 SENSORY_THRESHOLD = 0.15
 RAMP_STEP         = 5
 DEFAULT_DURATION  = 500
