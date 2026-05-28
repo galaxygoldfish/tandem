@@ -39,8 +39,6 @@ struct TherapistSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 20)
 
-            TensWaveformCard()
-
             Spacer()
 
             if !serialManager.isConsolePoppedOut {

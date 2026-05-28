@@ -3,49 +3,30 @@ import SwiftUI
 struct PatientSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = true
-    @State private var intensity: Double = 2
+    @State private var intensity: Double = 6
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            VStack(alignment: .leading, spacing: 8) {
-                WaveformView(
-                    data: serialManager.plotData,
-                    isRecording: serialManager.isRecording,
-                    isConnected: serialManager.isConnected
-                )
-                .frame(height: 200)
-                .animation(.linear(duration: 0.05), value: serialManager.plotData)
-                .id(serialManager.isConnected)
 
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(serialManager.isConnected ? Color.green : Color.red)
-                        .frame(width: 8, height: 8)
-                    Text(serialManager.isConnected ? "Therapist connected" : "Therapist disconnected")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 20)
-
-            stimulationCard
+            enableStimulationCard
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
-
-            TensWaveformCard()
-                .padding(.top, 16)
-
             Spacer()
 
-            if !serialManager.isConsolePoppedOut {
-                consolePanel
-            }
+            intensityCard
+                .padding(.horizontal, 20)
+                
+            Spacer()
+            
+            exerciseCard
+                .padding(.horizontal, 20)
+            
+            Spacer()
+                
+            TensWaveformCard()
+                .padding(.bottom, 20)
+
         }
         .toolbar {
             ToolbarItemGroup {
@@ -66,21 +47,73 @@ struct PatientSessionView: View {
         .navigationSubtitle(tensSubtitle)
     }
 
-    private var stimulationCard: some View {
-        VStack(spacing: 14) {
-            Toggle("Stimulation", isOn: $serialManager.isTensEnabled)
-                .toggleStyle(.switch)
-                .font(.headline)
+    private var exerciseCard: some View {
+        VStack(alignment: .leading) {
+                Text("You're doing")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Bicep curl")
+                    .font(.title.bold())
+                    .padding(.bottom, 10)
+                    .padding(.top, 5)
+            
+            if let videoURL = Bundle.main.url(forResource: "MVCAnimation", withExtension: "mov") {
+                LoopingVideoView(url: videoURL, cornerRadius: 10, replayDelay: 3.0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 5)
+                    .padding(.bottom, 5)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var enableStimulationCard: some View {
+        Button(action: { serialManager.isTensEnabled.toggle() }) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Enable stimulation")
+                        .font(.title3.bold())
+                    Text("This allows the therapist's movement to be translated to your muscles")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("Enable stimulation", isOn: $serialManager.isTensEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(Rectangle())
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var intensityCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Maximum stimulation strength")
+                .font(.title3.bold())
+            Text("This is the highest value you will be stimulated at - turn down for less intensity and turn up if you don't see movement")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Slider(
                 value: $intensity,
                 in: 2...8,
                 step: 1,
                 label: { Text("Intensity") },
-                minimumValueLabel: { Image(systemName: "bolt") },
-                maximumValueLabel: { Image(systemName: "bolt.fill") }
+                minimumValueLabel: { Image(systemName: "bolt").padding(10) },
+                maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
             )
             .labelsHidden()
+            .controlSize(.extraLarge)
+            .padding(.top, 8)
 
             HStack {
                 ForEach(2...8, id: \.self) { tick in

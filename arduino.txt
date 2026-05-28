@@ -5,7 +5,7 @@ void setup() {
   tensServo.attach(9);
   Serial.begin(115200);
   delay(1000);
-  Serial.println("SYSTEM_START_TENS");
+  Serial.println(SYSTEM_START_TENS);
   tensServo.write(0);
 }
 
@@ -13,7 +13,7 @@ void loop () {
   if (Serial.available() > 0) {
     int angle = Serial.parseInt();
     slowMove(angle);
-    Serial.print("Angle: ");
+    Serial.print(Angle: );
     Serial.println(angle);
   }
 }
@@ -23,12 +23,13 @@ void slowMove(int targetAngle) {
   if (currentAngle < targetAngle) {
     for (int i = currentAngle; i <= targetAngle; i++) {
       tensServo.write(i);
-      delay(15); // increase this number = slower
+      delay(70); // increase this number = slower
     }
   } else {
     for (int i = currentAngle; i >= targetAngle; i--) {
       tensServo.write(i);
-      delay(15);
+      delay(50);
     }
   }
 }
+

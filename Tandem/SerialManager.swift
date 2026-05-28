@@ -43,7 +43,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Mapped TENS output level based on normalized strength [0, 1].
     @Published var tensOutput: Double = 0.0
     /// Whether to actively send TENS commands.
-    @Published var isTensEnabled: Bool = false
+    @Published var isTensEnabled: Bool = true
     /// Captured baseline envelope (mV) — mean of quiet rest period.
     @Published var baselineMV: Double?
     /// Captured MVC envelope (mV) — 95th percentile of strong flex period.
