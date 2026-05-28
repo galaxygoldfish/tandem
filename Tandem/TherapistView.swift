@@ -42,15 +42,16 @@ struct TherapistView: View {
         Group {
             switch step {
             case .placement:
-                placementBody
+                placementBody.transition(.onboardingStep)
             case .calibrationBaseline:
-                baselineCalibrationBody
+                baselineCalibrationBody.transition(.onboardingStep)
             case .calibrationMVC:
-                mvcCalibrationBody
+                mvcCalibrationBody.transition(.onboardingStep)
             case .session:
-                DevelopmentView()
+                TherapistSessionView().transition(.onboardingStep)
             }
         }
+        .animation(.onboardingSpring, value: step)
         .background(WindowAccessor { tileWindow($0, to: .left) })
         .onAppear {
             serialManager.calibrationCompleted = false

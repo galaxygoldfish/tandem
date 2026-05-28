@@ -3,21 +3,22 @@ struct WaveformView: View {
     var data: [Double]
     var isRecording: Bool = false
     var isConnected: Bool = false
-    
+    var tint: Color = .green
+
     let range: Double = 800.0
 
     var body: some View {
-        
+
         GeometryReader { geometry in
-            
+
             Canvas { context, size in
                 let stepX = size.width / CGFloat(250 - 1)
                 let midY = size.height / 2
-                
+
                 let themeColor: Color = {
                     if !isConnected { return .gray }
                     if isRecording { return .red }
-                    return .green
+                    return tint
                 }()
                 
                 let gridLinesHorizontal = 15

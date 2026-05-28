@@ -29,7 +29,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var isConnected: Bool = false
     @Published var isTensConnected: Bool = false
     @Published var isPaused: Bool = false
-    @Published var plotData: [Double] = Array(repeating: 0.0, count: 250)  // Waveform display buffer
+    @Published var plotData: [Double] = Array(repeating: 0.0, count: 250)  // EMG waveform display buffer
+    @Published var tensPlotData: [Double] = Array(repeating: 0.0, count: 250)  // TENS output display buffer
     @Published var isRecording: Bool = false
     @Published var recordingTime: String = "00:00"
     @Published var isConsolePoppedOut: Bool = false
@@ -349,6 +350,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         DispatchQueue.main.async {
             self.plotData.append(self.smoothedValue)
             if self.plotData.count > 250 { self.plotData.removeFirst() }
+            // Scale TENS [0, 1] to the same display range used by the EMG waveform.
+            self.tensPlotData.append(tensLevel * 400)
+            if self.tensPlotData.count > 250 { self.tensPlotData.removeFirst() }
             self.normalizedStrength = normalized
             self.tensOutput = tensLevel
         }

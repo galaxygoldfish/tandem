@@ -23,13 +23,14 @@ struct PatientView: View {
         Group {
             switch step {
             case .placement:
-                placementBody
+                placementBody.transition(.onboardingStep)
             case .waiting:
-                waitingBody
+                waitingBody.transition(.onboardingStep)
             case .session:
-                DevelopmentView()
+                PatientSessionView().transition(.onboardingStep)
             }
         }
+        .animation(.onboardingSpring, value: step)
         .background(WindowAccessor { tileWindow($0, to: .right) })
         .onChange(of: serialManager.calibrationCompleted) { _, completed in
             if completed && step == .waiting {

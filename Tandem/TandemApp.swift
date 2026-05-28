@@ -1,7 +1,7 @@
 import SwiftUI
 import ORSSerial
 
-enum AppFlow {
+enum AppFlow: Hashable {
     case welcome
     case connect
     case exerciseSelect
@@ -41,29 +41,35 @@ struct TandemApp: App {
         }
     }
 
-    @ViewBuilder
     private var rootView: some View {
-        switch flow {
-        case .welcome:
-            WelcomeView(onStart: { flow = .connect })
-        case .connect:
-            HardwareConnectionView(
-                onContinue: { flow = .exerciseSelect },
-                onBack: { flow = .welcome }
-            )
-        case .exerciseSelect:
-            ExerciseSelectionView(
-                onSelect: { flow = .therapist($0) },
-                onDeveloper: { flow = .developer },
-                onBack: { flow = .connect }
-            )
-        case .therapist(let exercise):
-            TherapistView(
-                exercise: exercise,
-                onBack: { flow = .exerciseSelect }
-            )
-        case .developer:
-            DevelopmentView()
+        Group {
+            switch flow {
+            case .welcome:
+                WelcomeView(onStart: { withAnimation(.onboardingSpring) { flow = .connect } })
+                    .transition(.onboardingStep)
+            case .connect:
+                HardwareConnectionView(
+                    onContinue: { withAnimation(.onboardingSpring) { flow = .exerciseSelect } },
+                    onBack: { withAnimation(.onboardingSpring) { flow = .welcome } }
+                )
+                .transition(.onboardingStep)
+            case .exerciseSelect:
+                ExerciseSelectionView(
+                    onSelect: { selection in withAnimation(.onboardingSpring) { flow = .therapist(selection) } },
+                    onDeveloper: { withAnimation(.onboardingSpring) { flow = .developer } },
+                    onBack: { withAnimation(.onboardingSpring) { flow = .connect } }
+                )
+                .transition(.onboardingStep)
+            case .therapist(let exercise):
+                TherapistView(
+                    exercise: exercise,
+                    onBack: { withAnimation(.onboardingSpring) { flow = .exerciseSelect } }
+                )
+                .transition(.onboardingStep)
+            case .developer:
+                DevelopmentView()
+                    .transition(.onboardingStep)
+            }
         }
     }
 }

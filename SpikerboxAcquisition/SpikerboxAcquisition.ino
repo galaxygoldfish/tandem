@@ -1,8 +1,34 @@
+#include <Servo.h>
+Servo tensServo;
+
 void setup() {
+  tensServo.attach(9);
   Serial.begin(115200);
   delay(1000);
   Serial.println("SYSTEM_START_TENS");
+  tensServo.write(0);
 }
 
-void loop() {
+void loop () {
+  if (Serial.available() > 0) {
+    int angle = Serial.parseInt();
+    slowMove(angle);
+    Serial.print("Angle: ");
+    Serial.println(angle);
+  }
+}
+
+void slowMove(int targetAngle) { 
+  int currentAngle = tensServo.read();
+  if (currentAngle < targetAngle) {
+    for (int i = currentAngle; i <= targetAngle; i++) {
+      tensServo.write(i);
+      delay(70); // increase this number = slower
+    }
+  } else {
+    for (int i = currentAngle; i >= targetAngle; i--) {
+      tensServo.write(i);
+      delay(50);
+    }
+  }
 }
