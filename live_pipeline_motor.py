@@ -26,7 +26,7 @@ import serial
 
 CALIBRATION_FILE     = "calibration.ems"
 EMG_BAUD             = 115200
-MOTOR_BAUD           = 9600    # change to 115200 for real hardware
+MOTOR_BAUD           = 115200    # change to 115200 for real hardware
 TO_MILLIVOLTS        = 0.00815
 ENVELOPE_WINDOW      = 20
 BASELINE_ALPHA       = 0.0001
