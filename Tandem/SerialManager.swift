@@ -194,6 +194,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Exponent 1.8 means: gentle response at low levels, steep ramp at high levels.
     /// This prevents small arm movements from causing sudden large stimulation jumps.
     private func mapToTensLevel(_ normalized: Double) -> Double {
+        let sensoryThreshold = 0.15  // Below this, output is zero — prevents rest noise from triggering stim
+        guard normalized >= sensoryThreshold else { return 0.0 }
         let safeNormalized = max(0.0, min(1.0, normalized))
         let exponent = 1.8  // Tunable: >1 = nonlinear, 1 = linear, <1 = inverse
         return pow(safeNormalized, exponent)
