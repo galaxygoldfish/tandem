@@ -26,7 +26,7 @@ import serial
 
 CALIBRATION_FILE     = "calibration.ems"
 EMG_BAUD             = 115200
-MOTOR_BAUD           = 9600    # change to 115200 for real hardware
+MOTOR_BAUD           = 115200    # change to 115200 for real hardware
 TO_MILLIVOLTS        = 0.00815
 ENVELOPE_WINDOW      = 20
 BASELINE_ALPHA       = 0.0001
@@ -34,7 +34,8 @@ BASELINE_ALPHA_FAST  = 0.05
 BASELINE_WARMUP      = 500
 SENSORY_THRESHOLD    = 0.15
 MAX_DEGREES          = 100
-SEND_INTERVAL        = 0.1
+SEND_INTERVAL        = 0.5   # send averaged command every 500ms
+AVERAGE_WINDOW       = 0.5   # average normalized values over this window before sending
 
 def load_calibration(filepath):
     config = configparser.ConfigParser()
@@ -141,6 +142,7 @@ def main():
     processor = EMGProcessor()
     data_buffer = ""
     last_send_time = 0.0
+    window_samples = []
     session_log = []
     session_start = time.time()
 
@@ -213,15 +215,18 @@ def main():
                     print(f"  EMG: {envelope:.4f} mV  (calibrate first)", end="\r")
                     continue
                 now = time.time()
+                window_samples.append(normalized)
                 if now - last_send_time < SEND_INTERVAL:
                     continue
                 last_send_time = now
-                cmd = activation_to_motor_command(normalized, args.max_degrees)
+                avg_normalized = sum(window_samples) / len(window_samples)
+                window_samples.clear()
+                cmd = activation_to_motor_command(avg_normalized, args.max_degrees)
                 degrees = int(cmd.strip())
-                session_log.append([round(now - session_start, 3), round(envelope, 5), round(normalized, 4), degrees])
+                session_log.append([round(now - session_start, 3), round(envelope, 5), round(avg_normalized, 4), degrees])
                 if motor_port:
                     motor_port.write(cmd.encode("utf-8"))
-                print(f"  EMG: {envelope:.4f} mV  activation: {normalized:.0%}  → {degrees} degrees")
+                print(f"  EMG: {envelope:.4f} mV  activation: {avg_normalized:.0%}  → {degrees} degrees")
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:

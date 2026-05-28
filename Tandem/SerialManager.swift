@@ -79,6 +79,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var baselineSamples: [Double] = []  // Samples captured during baseline calibration
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
+    private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -105,6 +106,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
+        tensWindowSamples.removeAll()
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
             self.plotData = Array(repeating: 0.0, count: 250)
@@ -198,8 +200,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let sensoryThreshold = 0.15  // Below this, output is zero — prevents rest noise from triggering stim
         guard normalized >= sensoryThreshold else { return 0.0 }
         let safeNormalized = max(0.0, min(1.0, normalized))
-        let exponent = 1.8  // Tunable: >1 = nonlinear, 1 = linear, <1 = inverse
-        return pow(safeNormalized, exponent)
+        return safeNormalized
     }
 
     /// Send TENS command to the device. Currently logs the command; integrate actual TENS hardware here.
@@ -214,11 +215,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     ///   - "LEVEL:75" for 0-100 scale
     ///   - etc.
     private func sendTensCommand(_ level: Double) {
-        let command = String(format: "TENS: %.3f", level)
+        let degrees = Int(level * 100)
+        let command = "\(degrees)\n"
         DispatchQueue.main.async {
-            self.logs.append(LogEntry(text: "SEND → \(command)"))
+            self.logs.append(LogEntry(text: "SEND → \(degrees) degrees"))
         }
-        // TODO: Implement actual TENS device communication here.
+        if let data = command.data(using: .utf8) {
+            tensPort?.send(data)
+        }
     }
 
     @objc func portsChanged(_ notification: Notification) {
@@ -340,10 +344,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        // Send TENS command at ~10 Hz (every 100 ms) if enabled.
-        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > 0.1 {
+        // Accumulate normalized values and send averaged command every 500ms.
+        tensWindowSamples.append(normalized)
+        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > 0.5 {
             lastTensSent = Date()
-            sendTensCommand(tensLevel)
+            let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
+            tensWindowSamples.removeAll()
+            let avgTensLevel = mapToTensLevel(avgNormalized)
+            sendTensCommand(avgTensLevel)
         }
 
         // Update UI with latest values.
