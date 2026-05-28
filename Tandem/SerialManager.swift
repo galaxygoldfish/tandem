@@ -78,6 +78,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var baselineSamples: [Double] = []  // Samples captured during baseline calibration
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
+    private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -104,6 +105,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
+        tensWindowSamples.removeAll()
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
             self.plotData = Array(repeating: 0.0, count: 250)
@@ -341,10 +343,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        // Send TENS command at ~10 Hz (every 100 ms) if enabled.
-        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > 0.1 {
+        // Accumulate normalized values and send averaged command every 500ms.
+        tensWindowSamples.append(normalized)
+        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > 0.5 {
             lastTensSent = Date()
-            sendTensCommand(tensLevel)
+            let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
+            tensWindowSamples.removeAll()
+            let avgTensLevel = mapToTensLevel(avgNormalized)
+            sendTensCommand(avgTensLevel)
         }
 
         // Update UI with latest values.
