@@ -80,6 +80,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
     private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
+    private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
+    private var lastActiveValue: Double = 0.0
+    private let holdTime: Double = 1.0  // hold last position for 1s after flex ends
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -350,8 +353,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             lastTensSent = Date()
             let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
             tensWindowSamples.removeAll()
-            let avgTensLevel = mapToTensLevel(avgNormalized)
-            sendTensCommand(avgTensLevel)
+            let sensoryThreshold = 0.15
+            if avgNormalized >= sensoryThreshold {
+                lastActiveTime = Date()
+                lastActiveValue = avgNormalized
+            }
+            let inHold = Date().timeIntervalSince(lastActiveTime) < holdTime
+            let sendValue = avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
+            sendTensCommand(mapToTensLevel(sendValue))
         }
 
         // Update UI with latest values.

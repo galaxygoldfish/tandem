@@ -36,6 +36,7 @@ SENSORY_THRESHOLD    = 0.15
 MAX_DEGREES          = 100
 SEND_INTERVAL        = 0.5   # send averaged command every 500ms
 AVERAGE_WINDOW       = 0.5   # average normalized values over this window before sending
+HOLD_TIME            = 1.0   # hold last position for this many seconds after flex ends
 
 def load_calibration(filepath):
     config = configparser.ConfigParser()
@@ -142,6 +143,8 @@ def main():
     processor = EMGProcessor()
     data_buffer = ""
     last_send_time = 0.0
+    last_active_time = 0.0
+    last_active_value = 0.0
     window_samples = []
     session_log = []
     session_start = time.time()
@@ -221,7 +224,12 @@ def main():
                 last_send_time = now
                 avg_normalized = sum(window_samples) / len(window_samples)
                 window_samples.clear()
-                cmd = activation_to_motor_command(avg_normalized, args.max_degrees)
+                if avg_normalized >= SENSORY_THRESHOLD:
+                    last_active_time = now
+                    last_active_value = avg_normalized
+                in_hold = (now - last_active_time) < HOLD_TIME
+                send_value = avg_normalized if avg_normalized >= SENSORY_THRESHOLD else (last_active_value if in_hold else 0)
+                cmd = activation_to_motor_command(send_value, args.max_degrees)
                 degrees = int(cmd.strip())
                 session_log.append([round(now - session_start, 3), round(envelope, 5), round(avg_normalized, 4), degrees])
                 if motor_port:
