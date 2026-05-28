@@ -197,8 +197,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let sensoryThreshold = 0.15  // Below this, output is zero — prevents rest noise from triggering stim
         guard normalized >= sensoryThreshold else { return 0.0 }
         let safeNormalized = max(0.0, min(1.0, normalized))
-        let exponent = 1.8  // Tunable: >1 = nonlinear, 1 = linear, <1 = inverse
-        return pow(safeNormalized, exponent)
+        return safeNormalized
     }
 
     /// Send TENS command to the device. Currently logs the command; integrate actual TENS hardware here.
@@ -213,11 +212,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     ///   - "LEVEL:75" for 0-100 scale
     ///   - etc.
     private func sendTensCommand(_ level: Double) {
-        let command = String(format: "TENS: %.3f", level)
+        let degrees = Int(level * 100)
+        let command = "\(degrees)\n"
         DispatchQueue.main.async {
-            self.logs.append(LogEntry(text: "SEND → \(command)"))
+            self.logs.append(LogEntry(text: "SEND → \(degrees) degrees"))
         }
-        // TODO: Implement actual TENS device communication here.
+        if let data = command.data(using: .utf8) {
+            tensPort?.send(data)
+        }
     }
 
     @objc func portsChanged(_ notification: Notification) {
