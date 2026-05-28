@@ -6,16 +6,21 @@ struct HardwareConnectionView: View {
     var onContinue: () -> Void
     var onBack: () -> Void
 
-    // TENS connection isn't implemented yet — hardcoded until it is.
-    private let isTensConnected = false
-
     private var canContinue: Bool {
-        serialManager.isConnected
+        serialManager.isConnected && serialManager.isTensConnected
     }
 
     private var spikerBoxStatusText: String {
         guard serialManager.isConnected else { return "Disconnected" }
         if let path = serialManager.serialPort?.path {
+            return "Connected on \(path)"
+        }
+        return "Connected"
+    }
+
+    private var tensStatusText: String {
+        guard serialManager.isTensConnected else { return "Disconnected" }
+        if let path = serialManager.tensPort?.path {
             return "Connected on \(path)"
         }
         return "Connected"
@@ -39,8 +44,8 @@ struct HardwareConnectionView: View {
                 deviceRow(
                     name: "TENS Unit",
                     imageName: "TensUnit",
-                    isConnected: isTensConnected,
-                    statusText: isTensConnected ? "Connected" : "Disconnected"
+                    isConnected: serialManager.isTensConnected,
+                    statusText: tensStatusText
                 )
             }
             .padding(20)

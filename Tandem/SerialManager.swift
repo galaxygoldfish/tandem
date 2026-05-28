@@ -27,6 +27,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     // MARK: - UI Publishing
     @Published var logs: [LogEntry] = []
     @Published var isConnected: Bool = false
+    @Published var isTensConnected: Bool = false
     @Published var isPaused: Bool = false
     @Published var plotData: [Double] = Array(repeating: 0.0, count: 250)  // Waveform display buffer
     @Published var isRecording: Bool = false
@@ -50,8 +51,17 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var calibrationMode: CalibrationMode = .none
     
     // MARK: - Serial Port & Buffers
+    /// EMG-identified port (broadcasts "VALUE:..." samples).
     var serialPort: ORSSerialPort?
-    private var dataBuffer = Data()
+    /// TENS-identified port. No incoming data expected; used only to track connection state.
+    var tensPort: ORSSerialPort?
+    private enum PortRole { case emg, tens }
+    /// Ports that have completed the SYSTEM_START handshake.
+    private var portRoles: [String: PortRole] = [:]
+    /// Per-port byte buffer used during identification.
+    private var pendingBuffers: [String: Data] = [:]
+    /// Line-buffer for EMG VALUE: parsing.
+    private var emgLineBuffer = Data()
     private var lastUIUpdate = Date()
     private var lastTensSent = Date(timeIntervalSince1970: 0)  // Throttle TENS commands
     
@@ -217,32 +227,25 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     func setupPort() {
         let availablePorts = ORSSerialPortManager.shared().availablePorts
-        let arduinoPort = availablePorts.first(where: {
-            $0.path.contains("usbmodem") || $0.path.contains("usbserial")
-        })
-        
-        // CASE 1: No Arduino found at all
-        guard let port = arduinoPort else {
-            DispatchQueue.main.async {
-                self.isConnected = false
-                self.serialPort = nil
-            }
-            return
+        let allPaths = availablePorts.map(\.path).joined(separator: ", ")
+        Logger.serial.info("Available serial ports: \(allPaths)")
+
+        let candidates = availablePorts.filter { port in
+            let path = port.path.lowercased()
+            // Accept any USB-attached serial port. Excludes Bluetooth-Incoming-Port etc.
+            return path.contains("usb")
         }
-        
-        // CASE 2: Arduino found. Check if we need to (re)open.
-        let needsConnection = !isConnected || self.serialPort != port || !(self.serialPort?.isOpen ?? false)
-        
-        if needsConnection {
-            self.serialPort?.delegate = nil
-            self.serialPort?.close()
-            
-            self.serialPort = port
-            self.serialPort?.baudRate = 115200
-            self.serialPort?.delegate = self
-            self.serialPort?.open()
-            
-            Logger.serial.info("Hardware found. Attempting connection to: \(port.path)")
+
+        // Open any candidate we don't already know.
+        for port in candidates where portRoles[port.path] == nil && pendingBuffers[port.path] == nil {
+            port.baudRate = 115200
+            port.delegate = self
+            pendingBuffers[port.path] = Data()
+            port.open()
+            Logger.serial.info("Opening port for identification: \(port.path)")
+            DispatchQueue.main.async {
+                self.logs.append(LogEntry(text: "OPENING: \(port.path)"))
+            }
         }
     }
     
@@ -394,49 +397,150 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     
     private let rawToMillivolts: Double = (5.0 / 1023.0 / 600.0) * 1000.0 // approx 0.00815
     
-    func serialPort(_ serialPort: ORSSerialPort, didReceive data: Data) {
-        dataBuffer.append(data)
-        guard let totalString = String(data: dataBuffer, encoding: .utf8) else { return }
+    func serialPort(_ port: ORSSerialPort, didReceive data: Data) {
+        if let role = portRoles[port.path] {
+            switch role {
+            case .emg:
+                processEMGData(data)
+            case .tens:
+                break  // TENS arduino has no incoming stream to parse yet.
+            }
+        } else {
+            identifyPort(port, incoming: data)
+        }
+    }
+
+    private func identifyPort(_ port: ORSSerialPort, incoming data: Data) {
+        var buffer = pendingBuffers[port.path] ?? Data()
+        buffer.append(data)
+        guard let text = String(data: buffer, encoding: .utf8) else {
+            pendingBuffers[port.path] = buffer
+            return
+        }
+
+        if text.contains("SYSTEM_START_EMG") {
+            assignEMG(port, leftoverBuffer: dropEverythingThrough("SYSTEM_START_EMG", in: text))
+        } else if text.contains("SYSTEM_START_TENS") {
+            portRoles[port.path] = .tens
+            pendingBuffers.removeValue(forKey: port.path)
+            DispatchQueue.main.async {
+                self.tensPort = port
+                self.isTensConnected = true
+                self.logs.append(LogEntry(text: "TENS CONNECTED: \(port.path)"))
+            }
+        } else if text.contains("VALUE:") {
+            // Fallback: the EMG arduino was already past setup() when we attached, so we
+            // missed SYSTEM_START_EMG. Streaming VALUE: lines are enough to identify it.
+            assignEMG(port, leftoverBuffer: buffer)
+        } else {
+            // Cap the identification buffer so a misbehaving device can't grow it unbounded.
+            if buffer.count > 4096 {
+                buffer.removeFirst(buffer.count - 4096)
+            }
+            pendingBuffers[port.path] = buffer
+        }
+    }
+
+    private func assignEMG(_ port: ORSSerialPort, leftoverBuffer: Data) {
+        portRoles[port.path] = .emg
+        pendingBuffers.removeValue(forKey: port.path)
+        emgLineBuffer = leftoverBuffer
+        DispatchQueue.main.async {
+            self.serialPort = port
+            self.isConnected = true
+            self.logs.append(LogEntry(text: "EMG CONNECTED: \(port.path)"))
+        }
+        // The TENS arduino prints SYSTEM_START_TENS once and then nothing. If we missed
+        // that line (e.g., the board didn't auto-reset on port open), it would stay pending
+        // forever. Once EMG is identified, treat any other still-pending usbmodem port as TENS.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.promotePendingPortsToTens()
+        }
+    }
+
+    private func promotePendingPortsToTens() {
+        let stillPending = pendingBuffers.keys
+        guard !stillPending.isEmpty else { return }
+        let knownPorts = ORSSerialPortManager.shared().availablePorts
+        for path in stillPending {
+            guard let port = knownPorts.first(where: { $0.path == path }) else { continue }
+            portRoles[path] = .tens
+            pendingBuffers.removeValue(forKey: path)
+            DispatchQueue.main.async {
+                self.tensPort = port
+                self.isTensConnected = true
+                self.logs.append(LogEntry(text: "TENS CONNECTED (by elimination): \(port.path)"))
+            }
+        }
+    }
+
+    /// Returns the bytes that follow the line containing `marker`, so the EMG line parser starts cleanly.
+    private func dropEverythingThrough(_ marker: String, in text: String) -> Data {
+        guard let range = text.range(of: marker) else { return Data() }
+        let afterMarker = text[range.upperBound...]
+        let afterLine = afterMarker.drop(while: { $0 != "\n" }).dropFirst()
+        return String(afterLine).data(using: .utf8) ?? Data()
+    }
+
+    private func processEMGData(_ data: Data) {
+        emgLineBuffer.append(data)
+        guard let totalString = String(data: emgLineBuffer, encoding: .utf8) else { return }
         var lines = totalString.components(separatedBy: .newlines)
-        
-        if lines.count > 1 {
-            let fragment = lines.removeLast()
-            dataBuffer = fragment.data(using: .utf8) ?? Data()
-            for line in lines {
-                let clean = line.replacingOccurrences(of: "VALUE:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if let rawValue = Double(clean) {
-                    processNewValue(rawValue)
-                    if !isPaused && Date().timeIntervalSince(lastUIUpdate) > 0.01 {
-                        let absoluteMV = rawValue * rawToMillivolts
-                        let logText = String(format: "%.4f mV", absoluteMV)
-                        DispatchQueue.main.async {
-                            self.logs.append(LogEntry(text: logText))
-                            if self.logs.count > 500 { self.logs.removeFirst() }
-                            self.lastUIUpdate = Date()
-                        }
+        guard lines.count > 1 else { return }
+
+        let fragment = lines.removeLast()
+        emgLineBuffer = fragment.data(using: .utf8) ?? Data()
+        for line in lines {
+            let clean = line.replacingOccurrences(of: "VALUE:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if let rawValue = Double(clean) {
+                processNewValue(rawValue)
+                if !isPaused && Date().timeIntervalSince(lastUIUpdate) > 0.01 {
+                    let absoluteMV = rawValue * rawToMillivolts
+                    let logText = String(format: "%.4f mV", absoluteMV)
+                    DispatchQueue.main.async {
+                        self.logs.append(LogEntry(text: logText))
+                        if self.logs.count > 500 { self.logs.removeFirst() }
+                        self.lastUIUpdate = Date()
                     }
                 }
             }
         }
     }
 
-    func serialPortWasOpened(_ serialPort: ORSSerialPort) {
+    func serialPortWasOpened(_ port: ORSSerialPort) {
+        // Connection state is committed once the port self-identifies via SYSTEM_START_*.
+        Logger.serial.info("Port opened, awaiting identification: \(port.path)")
+    }
+
+    func serialPortWasRemovedFromSystem(_ port: ORSSerialPort) {
+        let role = portRoles.removeValue(forKey: port.path)
+        pendingBuffers.removeValue(forKey: port.path)
+
         DispatchQueue.main.async {
-            self.isConnected = true
-            self.logs.append(LogEntry(text: "CONNECTED: \(serialPort.path)"))
+            switch role {
+            case .emg:
+                self.isConnected = false
+                self.serialPort = nil
+                self.logs.append(LogEntry(text: "EMG DISCONNECTED: \(port.path)"))
+            case .tens:
+                self.isTensConnected = false
+                self.tensPort = nil
+                self.logs.append(LogEntry(text: "TENS DISCONNECTED: \(port.path)"))
+            case .none:
+                self.logs.append(LogEntry(text: "PORT REMOVED (unidentified): \(port.path)"))
+            }
         }
     }
 
-    func serialPortWasRemovedFromSystem(_ serialPort: ORSSerialPort) {
+    func serialPort(_ port: ORSSerialPort, didEncounterError error: Error) {
+        let role = portRoles[port.path]
         DispatchQueue.main.async {
-            self.isConnected = false
-            self.logs.append(LogEntry(text: "DISCONNECTED: \(serialPort.path)"))
-            self.serialPort = nil
+            switch role {
+            case .emg: self.isConnected = false
+            case .tens: self.isTensConnected = false
+            case .none: break
+            }
         }
-    }
-    
-    func serialPort(_ serialPort: ORSSerialPort, didEncounterError error: Error) {
-        DispatchQueue.main.async { self.isConnected = false }
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import ORSSerial
 
 struct PatientView: View {
     @EnvironmentObject var serialManager: SerialManager
@@ -10,8 +11,13 @@ struct PatientView: View {
         case session
     }
 
-    // TENS connection isn't implemented yet — hardcoded until it is.
-    private let isTensConnected = false
+    private var tensStatusText: String {
+        guard serialManager.isTensConnected else { return "Disconnected" }
+        if let path = serialManager.tensPort?.path {
+            return "Connected on \(path)"
+        }
+        return "Connected"
+    }
 
     var body: some View {
         Group {
@@ -53,8 +59,8 @@ struct PatientView: View {
             deviceStatusCard(
                 name: "TENS Unit",
                 imageName: "TensUnit",
-                isConnected: isTensConnected,
-                statusText: isTensConnected ? "Connected" : "Disconnected"
+                isConnected: serialManager.isTensConnected,
+                statusText: tensStatusText
             )
 
             Button(action: { step = .waiting }) {
