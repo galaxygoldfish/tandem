@@ -5,6 +5,9 @@ struct PatientSessionView: View {
     @State private var isConsoleMinimized = true
     @State private var intensity: Double = 6
     @Environment(\.openWindow) private var openWindow
+    
+    // Track whether the waveform card is collapsed to dynamically resize the video
+    @State private var isWaveformCollapsed = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,8 +27,10 @@ struct PatientSessionView: View {
             
             Spacer()
                 
-            TensWaveformCard()
-                .padding(.bottom, 20)
+            // Pass the collapse state down to the waveform card as a binding
+            TensWaveformCard(isCollapsed: $isWaveformCollapsed)
+            
+            Spacer()
 
         }
         .toolbar {
@@ -41,33 +46,56 @@ struct PatientSessionView: View {
                 }
                 .buttonStyle(.bordered)
                 .help(serialManager.isPaused ? "Resume stream" : "Pause stream")
+
+                abortButton
             }
         }
         .navigationTitle("Patient")
         .navigationSubtitle(tensSubtitle)
     }
 
+    private var abortButton: some View {
+        Button(action: {}) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                Text("ABORT")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.red)
+        .help("Abort session")
+    }
+
     private var exerciseCard: some View {
         VStack(alignment: .leading) {
-                Text("You're doing")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("Bicep curl")
-                    .font(.title.bold())
-                    .padding(.bottom, 10)
-                    .padding(.top, 5)
+            Text("You're doing")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("Bicep curl")
+                .font(.title.bold())
+                .padding(.bottom, isWaveformCollapsed ? 10 : 0)
+                .padding(.top, 5)
             
             if let videoURL = Bundle.main.url(forResource: "MVCAnimation", withExtension: "mov") {
                 LoopingVideoView(url: videoURL, cornerRadius: 10, replayDelay: 3.0)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Collapses the height to 0 when the waveform is visible
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: isWaveformCollapsed ? .infinity : 0
+                    )
+                    // Fades out and disables interaction to ensure a clean layout switch
+                    .opacity(isWaveformCollapsed ? 1 : 0)
+                    .disabled(!isWaveformCollapsed)
                     .padding(.horizontal, 5)
-                    .padding(.bottom, 5)
+                    .padding(.bottom, isWaveformCollapsed ? 5 : 0)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        // Smoothly animates the card resizing when the state changes
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isWaveformCollapsed)
     }
 
     private var enableStimulationCard: some View {

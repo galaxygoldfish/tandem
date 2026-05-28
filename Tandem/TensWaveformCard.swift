@@ -2,13 +2,15 @@ import SwiftUI
 
 struct TensWaveformCard: View {
     @EnvironmentObject var serialManager: SerialManager
-    @State private var isMinimized = false
+    
+    // Bind this to the parent view to coordinate the video collapsing
+    @Binding var isCollapsed: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: isMinimized ? 0 : 8) {
+        VStack(alignment: .leading, spacing: isCollapsed ? 0 : 8) {
             header
 
-            if !isMinimized {
+            if !isCollapsed {
                 WaveformView(
                     data: serialManager.tensPlotData,
                     isRecording: false,
@@ -40,10 +42,10 @@ struct TensWaveformCard: View {
 
             Button(action: {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    isMinimized.toggle()
+                    isCollapsed.toggle()
                 }
             }) {
-                Image(systemName: isMinimized ? "menubar.arrow.up.rectangle" : "menubar.rectangle")
+                Image(systemName: isCollapsed ? "menubar.arrow.up.rectangle" : "menubar.rectangle")
             }
             .buttonStyle(.plain)
         }

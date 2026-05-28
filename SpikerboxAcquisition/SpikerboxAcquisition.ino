@@ -22,7 +22,7 @@ void slowMove(int targetAngle) {
   int currentAngle = tensServo.read();
   if (currentAngle < targetAngle) {
     for (int i = currentAngle; i <= targetAngle; i++) {
-      tensServo.write(i);
+      tensServo.write(i + 15);
       delay(15); // increase this number = slower
     }
   } else {

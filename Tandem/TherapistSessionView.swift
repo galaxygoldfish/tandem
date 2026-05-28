@@ -50,10 +50,23 @@ struct TherapistSessionView: View {
                 pauseButton
                 Spacer()
                 recalibrateButton
+                abortButton
             }
         }
         .navigationTitle("Therapist")
         .navigationSubtitle(connectionSubtitle)
+    }
+
+    private var abortButton: some View {
+        Button(action: {}) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                Text("ABORT")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.red)
+        .help("Abort session")
     }
 
     private var connectionSubtitle: Text {
