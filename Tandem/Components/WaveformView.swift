@@ -1,4 +1,8 @@
 import SwiftUI
+
+/// Canvas-based line plot used for EMG (green) and TENS (red) live signals.
+/// The trace colors itself based on `isConnected`/`isRecording`/`tint`,
+/// drawn over a faint grid with a soft gradient fill under the line.
 struct WaveformView: View {
     var data: [Double]
     var isRecording: Bool = false

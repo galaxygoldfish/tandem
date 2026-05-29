@@ -1,5 +1,10 @@
 import SwiftUI
 
+/// Shared card showing the live TENS output waveform in red, with a
+/// connection status row and a header chevron to collapse to just the
+/// header. The collapsed state is owned by the parent so it can react to
+/// it (e.g., resizing a companion video). Used by both Therapist and
+/// Patient session views.
 struct TensWaveformCard: View {
     @EnvironmentObject var serialManager: SerialManager
     

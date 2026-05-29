@@ -1,6 +1,9 @@
 import SwiftUI
 import ORSSerial
 
+/// Therapist onboarding flow: electrode placement → baseline capture → MVC
+/// capture → `TherapistSessionView`. Also opens (and tiles) the patient
+/// window, and broadcasts calibration completion to it via `SerialManager`.
 struct TherapistView: View {
     @EnvironmentObject var serialManager: SerialManager
     @Environment(\.openWindow) private var openWindow
@@ -12,9 +15,13 @@ struct TherapistView: View {
     @State private var mvcPhase: CapturePhase = .idle
     @State private var mvcSecondsRemaining: Int = 3
     @State private var mvcCountdownProgress: Double = 0
+    /// The therapist's own NSWindow, captured via `WindowAccessor` so we can
+    /// re-tile it even after the patient window steals key/main status.
+    @State private var hostWindow: NSWindow?
     var exercise: ExerciseSelectionView.Exercise
     var onBack: () -> Void
 
+    /// Onboarding sub-steps inside the therapist window.
     enum Step {
         case placement
         case calibrationBaseline
@@ -22,6 +29,7 @@ struct TherapistView: View {
         case session
     }
 
+    /// Phase of an individual countdown capture (baseline or MVC).
     enum CapturePhase {
         case idle
         case recording
@@ -52,12 +60,23 @@ struct TherapistView: View {
             }
         }
         .animation(.onboardingSpring, value: step)
-        .background(WindowAccessor { tileWindow($0, to: .left) })
+        .background(WindowAccessor { window in
+            hostWindow = window
+            tileWindow(window, to: .left)
+        })
         .onAppear {
             serialManager.calibrationCompleted = false
             serialManager.baselineMV = nil
             serialManager.mvcMV = nil
             openWindow(id: "patient-window")
+            // Re-tile the therapist's own window after the patient window has
+            // had a chance to open, in case the initial tile ran before the
+            // window was fully attached.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let window = hostWindow {
+                    tileWindow(window, to: .left)
+                }
+            }
         }
     }
 

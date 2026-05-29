@@ -1,60 +1,47 @@
 import SwiftUI
 
-struct DevelopmentView: View {
+/// Therapist's live view after calibration. Shows the EMG waveform with the
+/// current strength %, the TENS output waveform, plus toolbar controls for
+/// pausing the stream, re-running drift calibration, and aborting the session.
+struct TherapistSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
-    @State private var isConsoleMinimized = false
+    @State private var isConsoleMinimized = true
     @Environment(\.openWindow) private var openWindow
-    
+
     var body: some View {
         VStack(spacing: 0) {
-            
+
             Spacer()
-            
-            WaveformView(
-                data: serialManager.plotData,
-                isRecording: serialManager.isRecording,
-                isConnected: serialManager.isConnected
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.linear(duration: 0.05), value: serialManager.plotData)
-            .padding(.horizontal, 20)
-            .id(serialManager.isConnected)
-            
-            VStack(spacing: 12) {
-                // MARK: - Calibration & Strength Dashboard
-                // Displays live baseline/MVC values, current strength %, and TENS output level.
-                dashboardRow
-                    .frame(maxWidth: .infinity)
-                    .padding(12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                
-                // MARK: - Calibration & TENS Control Buttons
-                // Baseline: capture 3-5 seconds of quiet EMG
-                // MVC: capture 2-3 seconds of strong flex
-                // TENS: toggle TENS output on/off
-                HStack(spacing: 12) {
-                    Button(action: { serialManager.toggleBaselineCalibration() }) {
-                        Text(serialManager.calibrationMode == .baseline ? "Stop Baseline" : "Baseline")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    
-                    Button(action: { serialManager.toggleMVCCalibration() }) {
-                        Text(serialManager.calibrationMode == .mvc ? "Stop MVC" : "MVC")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    
-                    Button(action: { serialManager.toggleTensEnabled() }) {
-                        Text(serialManager.isTensEnabled ? "TENS On" : "TENS Off")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(serialManager.isTensEnabled ? .green : .secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                WaveformView(
+                    data: serialManager.plotData,
+                    isRecording: serialManager.isRecording,
+                    isConnected: serialManager.isConnected
+                )
+                .frame(height: 200)
+                .animation(.linear(duration: 0.05), value: serialManager.plotData)
+                .id(serialManager.isConnected)
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(serialManager.isConnected ? Color.green : Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(serialManager.isConnected ? "Therapist Connected" : "Therapist Disconnected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.0f%% strength", serialManager.normalizedStrength * 100))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
             }
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 20)
-            
-            Spacer()
-            
+
             if !serialManager.isConsolePoppedOut {
                 consolePanel
             }
@@ -64,19 +51,30 @@ struct DevelopmentView: View {
                 pauseButton
                 Spacer()
                 recalibrateButton
-                Spacer()
-                recordButton
+                abortButton
             }
         }
-        .navigationTitle("Tandem")
+        .navigationTitle("Therapist")
         .navigationSubtitle(connectionSubtitle)
+    }
+
+    private var abortButton: some View {
+        Button(action: { serialManager.isTensEnabled = false }) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                Text("ABORT")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.red)
+        .help("Abort session")
     }
 
     private var connectionSubtitle: Text {
         let dot = Text(Image(systemName: "circle.fill"))
             .foregroundColor(serialManager.isConnected ? .green : .red)
             .font(.system(size: 8))
-        let label = serialManager.isConnected ? "Connected" : "Disconnected"
+        let label = serialManager.isConnected ? "Recording connected" : "Recording disconnected"
         return Text("\(dot)  \(label)")
     }
 
@@ -101,20 +99,6 @@ struct DevelopmentView: View {
         }
         .buttonStyle(.bordered)
         .help("Recalibrate baseline")
-    }
-
-    private var recordButton: some View {
-        Button(action: { serialManager.toggleRecording() }) {
-            let recordText = serialManager.isRecording ? serialManager.recordingTime : "Record"
-            HStack(spacing: 8) {
-                Image(systemName: serialManager.isRecording ? "stop.circle.fill" : "record.circle")
-                Text(recordText)
-                    .padding(.trailing, 5)
-            }
-            .foregroundStyle(serialManager.isRecording ? .red : .primary)
-        }
-        .tint(serialManager.isRecording ? .red : .accentColor)
-        .buttonStyle(.bordered)
     }
 
     private var consolePanel: some View {
@@ -193,27 +177,4 @@ struct DevelopmentView: View {
         }
     }
 
-    private var dashboardRow: some View {
-        let baselineText = serialManager.baselineMV.map { String(format: "%.3f mV", $0) } ?? "--"
-        let mvcText = serialManager.mvcMV.map { String(format: "%.3f mV", $0) } ?? "--"
-        let strengthText = String(format: "%.0f%%", serialManager.normalizedStrength * 100)
-        let tensText = String(format: "%.3f", serialManager.tensOutput)
-        return HStack(spacing: 16) {
-            statCell(label: "Baseline", value: baselineText)
-            statCell(label: "MVC", value: mvcText)
-            Spacer()
-            statCell(label: "Strength", value: strengthText)
-            statCell(label: "TENS", value: tensText)
-        }
-    }
-
-    private func statCell(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            Text(value)
-                .font(.headline)
-        }
-    }
 }

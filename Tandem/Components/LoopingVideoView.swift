@@ -1,6 +1,15 @@
 import SwiftUI
 import AVKit
 
+/// Looping muted video player backed by an `AVPlayerLayer`. SwiftUI's
+/// `VideoPlayer` ships with playback chrome we don't want, and `clipShape`
+/// won't clip a hosted CALayer, so this representable owns its own layer
+/// and exposes a `cornerRadius`, an optional `replayDelay` to hold on the
+/// last frame between loops, and an `isPlaying` switch that freezes the
+/// video on its final frame when set to false.
+///
+/// Used for the bicep-curl reference animation in `PatientSessionView`
+/// and the baseline/MVC calibration animations in `TherapistView`.
 struct LoopingVideoView: NSViewRepresentable {
     let url: URL
     var cornerRadius: CGFloat = 0

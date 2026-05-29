@@ -12,6 +12,7 @@ extension AnyTransition {
 }
 
 extension Animation {
+    /// Quick, low-overshoot spring used for onboarding step changes.
     static var onboardingSpring: Animation {
         .spring(response: 0.28, dampingFraction: 0.85)
     }

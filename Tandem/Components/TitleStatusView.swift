@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// Compact "Tandem · connected" badge for windows without a native title
+/// bar (currently the pop-out console).
 struct TitleStatusView: View {
     @ObservedObject var serialManager: SerialManager
     

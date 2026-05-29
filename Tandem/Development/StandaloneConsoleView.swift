@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// Pop-out window companion for the in-app console panel. Activated from
+/// the docked console's expand button so the engineer can keep logs
+/// visible on a second display while the main UI stays focused.
 struct StandaloneConsoleView: View {
     @EnvironmentObject var serialManager: SerialManager
     @Environment(\.dismiss) private var dismiss

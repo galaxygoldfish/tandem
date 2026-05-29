@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// First screen the user sees. Shows the Tandem logo and tagline.
+/// `onStart` advances the app flow to the hardware connection step.
 struct WelcomeView: View {
     var onStart: () -> Void
 
@@ -34,8 +36,8 @@ struct WelcomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .background(WindowAccessor { centerMainWindowOnce($0) })
         .navigationTitle("Tandem")
-        .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .principal) {

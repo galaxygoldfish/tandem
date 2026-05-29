@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// Patient's live view after the therapist completes calibration. Lets the
+/// patient toggle stimulation on/off (whole card is tappable), pick a maximum
+/// stimulation strength via a discrete 2-8 slider, watch the bicep-curl
+/// reference loop, and see the live TENS waveform.
 struct PatientSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = true
@@ -19,17 +23,20 @@ struct PatientSessionView: View {
 
             intensityCard
                 .padding(.horizontal, 20)
-                
+                .dimmedWhenStimOff(serialManager.isTensEnabled)
+
             Spacer()
-            
+
             exerciseCard
                 .padding(.horizontal, 20)
-            
+                .dimmedWhenStimOff(serialManager.isTensEnabled)
+
             Spacer()
-                
+
             // Pass the collapse state down to the waveform card as a binding
             TensWaveformCard(isCollapsed: $isWaveformCollapsed)
-            
+                .dimmedWhenStimOff(serialManager.isTensEnabled)
+
             Spacer()
 
         }
@@ -55,7 +62,7 @@ struct PatientSessionView: View {
     }
 
     private var abortButton: some View {
-        Button(action: {}) {
+        Button(action: { serialManager.isTensEnabled = false }) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.octagon.fill")
                 Text("ABORT")
@@ -241,5 +248,18 @@ struct PatientSessionView: View {
                 }
             }
         }
+    }
+}
+
+private extension View {
+    /// Greys out and disables interaction with the receiver when `enabled` is
+    /// false. Used to mute the slider/exercise/TENS waveform cards while
+    /// stimulation is off.
+    func dimmedWhenStimOff(_ enabled: Bool) -> some View {
+        self
+            .opacity(enabled ? 1.0 : 0.4)
+            .grayscale(enabled ? 0 : 1)
+            .disabled(!enabled)
+            .animation(.easeInOut(duration: 0.2), value: enabled)
     }
 }

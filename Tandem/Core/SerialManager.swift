@@ -95,16 +95,20 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var timer: Timer?
     private var recordedData: [(timestamp: Int64, signal: Double, normalized: Double, tens: Double)] = []
 
+    /// Discover any already-attached USB serial ports and subscribe to
+    /// hot-plug events so future Arduinos are picked up automatically.
     override init() {
         super.init()
-        
+
         setupPort()
-        
+
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(portsChanged(_:)), name: NSNotification.Name.ORSSerialPortsWereConnected, object: nil)
         nc.addObserver(self, selector: #selector(portsChanged(_:)), name: NSNotification.Name.ORSSerialPortsWereDisconnected, object: nil)
     }
-    
+
+    /// Resets baseline tracking and clears the plot buffer.
+    /// Used by the toolbar "Recalibrate" button to recover from drift.
     func recalibrate() {
         dynamicBaseline = -1.0
         warmupCount = 0
@@ -228,6 +232,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
+    /// Notification handler for USB connect/disconnect events.
+    /// Delays the rescan so the OS has time to enumerate the new port.
     @objc func portsChanged(_ notification: Notification) {
         // Small delay allows the OS to fully register the port before we grab it
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -235,6 +241,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
+    /// Opens any USB serial port we haven't already identified, so it can be
+    /// classified as the EMG or TENS Arduino by its `SYSTEM_START_*` handshake.
     func setupPort() {
         let availablePorts = ORSSerialPortManager.shared().availablePorts
         let allPaths = availablePorts.map(\.path).joined(separator: ", ")
@@ -259,6 +267,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
     
+    /// Start or stop recording the EMG/TENS stream to disk.
     func toggleRecording() {
         if isRecording { stopRecording() }
         else { startRecording() }

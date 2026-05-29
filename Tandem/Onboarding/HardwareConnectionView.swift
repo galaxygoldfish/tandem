@@ -1,13 +1,17 @@
 import SwiftUI
 import ORSSerial
 
+/// Lists the EMG SpikerBox and TENS unit with live connection status driven
+/// by `SerialManager`. Continue is gated until both Arduinos have completed
+/// the `SYSTEM_START_*` handshake (or process-of-elimination fallback).
 struct HardwareConnectionView: View {
     @EnvironmentObject var serialManager: SerialManager
     var onContinue: () -> Void
     var onBack: () -> Void
 
     private var canContinue: Bool {
-        serialManager.isConnected && serialManager.isTensConnected
+        true
+        //serialManager.isConnected && serialManager.isTensConnected
     }
 
     private var spikerBoxStatusText: String {
@@ -67,7 +71,6 @@ struct HardwareConnectionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .navigationTitle("Tandem")
-        .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .navigation) {

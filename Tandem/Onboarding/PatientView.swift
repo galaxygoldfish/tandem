@@ -1,10 +1,15 @@
 import SwiftUI
 import ORSSerial
 
+/// Patient window root view. Mirrors the therapist's onboarding rhythm:
+/// electrode placement → "waiting for therapist" loader → `PatientSessionView`.
+/// Advances to `.session` automatically when the therapist sets
+/// `SerialManager.calibrationCompleted = true`.
 struct PatientView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var step: Step = .placement
 
+    /// Onboarding sub-steps inside the patient window.
     enum Step {
         case placement
         case waiting
