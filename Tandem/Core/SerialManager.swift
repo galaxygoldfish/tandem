@@ -52,6 +52,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var calibrationMode: CalibrationMode = .none
     
     // MARK: - Serial Port & Buffers
+    /// Set by the therapist view when wireless sender mode is active.
+    var networkManager: NetworkManager?
+
     /// EMG-identified port (broadcasts "VALUE:..." samples).
     var serialPort: ORSSerialPort?
     /// TENS-identified port. No incoming data expected; used only to track connection state.
@@ -214,6 +217,23 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         return safeNormalized
     }
 
+    /// Called by the patient Mac when receiving activation values wirelessly.
+    /// Applies hold time logic and drives the TENS/servo, mirroring processNewValue's send path.
+    func receiveRemoteActivation(_ value: Double) {
+        let sensoryThreshold = 0.15
+        let now = Date()
+        if value >= sensoryThreshold {
+            lastActiveTime = now
+            lastActiveValue = value
+        }
+        let inHold = now.timeIntervalSince(lastActiveTime) < holdTime
+        let sendValue = value >= sensoryThreshold ? value : (inHold ? lastActiveValue : 0.0)
+        let tensLevel = mapToTensLevel(sendValue)
+        sendTensCommand(tensLevel)
+        normalizedStrength = value
+        tensOutput = tensLevel
+    }
+
     /// Send TENS command to the device. Currently logs the command; integrate actual TENS hardware here.
     /// 
     /// TODO: Replace this with actual device communication:
@@ -374,6 +394,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             let inHold = Date().timeIntervalSince(lastActiveTime) < holdTime
             let sendValue = avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
             sendTensCommand(mapToTensLevel(sendValue))
+            networkManager?.sendActivation(avgNormalized)
         }
 
         // Update UI with latest values.

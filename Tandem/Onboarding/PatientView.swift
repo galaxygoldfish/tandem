@@ -7,7 +7,10 @@ import ORSSerial
 /// `SerialManager.calibrationCompleted = true`.
 struct PatientView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject private var networkManager: NetworkManager
     @State private var step: Step = .placement
+    @State private var wirelessEnabled: Bool = false
+    @State private var senderIP: String = ""
 
     /// Onboarding sub-steps inside the patient window.
     enum Step {
@@ -69,6 +72,8 @@ struct PatientView: View {
                 statusText: tensStatusText
             )
 
+            wirelessReceiverCard
+
             Button(action: { step = .waiting }) {
                 Text("Continue")
                     .frame(minWidth: 120)
@@ -90,6 +95,57 @@ struct PatientView: View {
             }
             .sharedBackgroundVisibility(.hidden)
         }
+    }
+
+    // MARK: - Wireless
+
+    @ViewBuilder
+    private var wirelessReceiverCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: $wirelessEnabled) {
+                Label("Receive wirelessly from therapist Mac", systemImage: "wifi")
+                    .font(.headline)
+            }
+            .onChange(of: wirelessEnabled) { _, enabled in
+                if !enabled { networkManager.stopReceiver() }
+            }
+
+            if wirelessEnabled {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Therapist's IP (e.g. 192.168.1.5)", text: $senderIP)
+                        .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Button("Connect") {
+                            networkManager.onActivationReceived = { [weak serialManager] value in
+                                serialManager?.receiveRemoteActivation(value)
+                            }
+                            networkManager.startReceiver(host: senderIP)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .disabled(senderIP.isEmpty || networkManager.isConnected)
+
+                        Spacer()
+
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(networkManager.isConnected ? Color.green : Color.secondary)
+                                .frame(width: 8, height: 8)
+                            Text(networkManager.connectionStatus)
+                                .font(.subheadline)
+                                .foregroundStyle(networkManager.isConnected ? .primary : .secondary)
+                        }
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 480)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .animation(.easeInOut(duration: 0.2), value: wirelessEnabled)
     }
 
     // MARK: - Waiting

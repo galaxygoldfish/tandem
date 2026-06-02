@@ -4,11 +4,17 @@ live_pipeline_motor.py
 Backup plan: reads EMG from Spikerbox, maps activation to servo degrees,
 sends to motor Arduino.
 
-Usage (testing):
+Usage (local):
     python3 live_pipeline_motor.py --emg /dev/tty.usbmodemXXXX --motor /dev/tty.usbmodemYYYY
 
+Usage (wireless sender — Computer A with Spikerbox):
+    python3 live_pipeline_motor.py --emg /dev/tty.usbmodemXXXX --stream-port 9000
+
+Usage (wireless receiver — Computer B with Arduino):
+    python3 live_pipeline_motor.py --stream-host 192.168.x.x:9000 --motor /dev/tty.usbmodemYYYY
+
 Find your ports: ls /dev/tty.*
-Note: motor Arduino baud rate is 9600 for testing, 115200 for final hardware.
+Find your IP:    ipconfig getifaddr en0
 """
 
 import sys
@@ -20,13 +26,14 @@ import threading
 import tty
 import termios
 import csv
+import socket
 sys.path.insert(0, "../openEMSstim/apps/python")
 
 import serial
 
 CALIBRATION_FILE     = "calibration.ems"
 EMG_BAUD             = 115200
-MOTOR_BAUD           = 115200    # change to 115200 for real hardware
+MOTOR_BAUD           = 115200
 TO_MILLIVOLTS        = 0.00815
 ENVELOPE_WINDOW      = 20
 BASELINE_ALPHA       = 0.0001
@@ -37,6 +44,7 @@ MAX_DEGREES          = 180
 SEND_INTERVAL        = 0.5   # send averaged command every 500ms
 AVERAGE_WINDOW       = 0.5   # average normalized values over this window before sending
 HOLD_TIME            = 1.0   # hold last position for this many seconds after flex ends
+STREAM_PORT          = 9000
 
 def load_calibration(filepath):
     config = configparser.ConfigParser()
@@ -120,25 +128,104 @@ def activation_to_motor_command(activation_norm, max_degrees=MAX_DEGREES):
 
 def main():
     parser = argparse.ArgumentParser(description="Tandem motor backup pipeline")
-    parser.add_argument("--emg", required=True, help="Serial port for Spikerbox")
+    parser.add_argument("--emg", required=False, help="Serial port for Spikerbox (not needed in receiver mode)")
     parser.add_argument("--motor", required=False, help="Serial port for motor Arduino")
     parser.add_argument("--dry-run", action="store_true", help="Print commands instead of sending")
-    parser.add_argument("--max-degrees", type=int, default=MAX_DEGREES, help="Max servo degrees (default 100)")
+    parser.add_argument("--max-degrees", type=int, default=MAX_DEGREES, help="Max servo degrees (default 180)")
+    parser.add_argument("--stream-port", type=int, metavar="PORT", help="Sender mode: broadcast activation over TCP on this port")
+    parser.add_argument("--stream-host", metavar="HOST:PORT", help="Receiver mode: connect to sender instead of reading EMG")
     args = parser.parse_args()
+
+    # ── MOTOR PORT SETUP (shared by both modes) ─────────────────
+    if args.dry_run:
+        motor_port = None
+        print("DRY RUN — motor commands will be printed, not sent.")
+    elif args.motor:
+        print(f"Connecting to motor Arduino on {args.motor} at {MOTOR_BAUD} baud...")
+        motor_port = serial.Serial(args.motor, MOTOR_BAUD, timeout=1)
+        time.sleep(2)
+        print("Motor Arduino connected.")
+    else:
+        motor_port = None
+
+    # ── RECEIVER MODE (Computer B) ───────────────────────────────
+    if args.stream_host:
+        host, port_str = args.stream_host.rsplit(":", 1)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print(f"Connecting to sender at {args.stream_host}...")
+        sock.connect((host, int(port_str)))
+        print("Connected.\n")
+        print("="*55)
+        print("TANDEM MOTOR — RECEIVER MODE")
+        print("="*55)
+        buf = ""
+        last_active_time = 0.0
+        last_active_value = 0.0
+        try:
+            while True:
+                chunk = sock.recv(1024).decode("utf-8", errors="ignore")
+                if not chunk:
+                    print("[NET] Sender disconnected.")
+                    break
+                buf += chunk
+                lines = buf.split("\n")
+                buf = lines[-1]
+                for line in lines[:-1]:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        avg_normalized = float(line)
+                    except ValueError:
+                        continue
+                    now = time.time()
+                    if avg_normalized >= SENSORY_THRESHOLD:
+                        last_active_time = now
+                        last_active_value = avg_normalized
+                    in_hold = (now - last_active_time) < HOLD_TIME
+                    send_value = avg_normalized if avg_normalized >= SENSORY_THRESHOLD else (last_active_value if in_hold else 0)
+                    cmd = activation_to_motor_command(send_value, args.max_degrees)
+                    degrees = int(cmd.strip())
+                    if motor_port:
+                        motor_port.write(cmd.encode("utf-8"))
+                    print(f"  activation: {avg_normalized:.0%}  → {degrees} degrees")
+        except KeyboardInterrupt:
+            print("\nStopped.")
+        finally:
+            sock.close()
+            if motor_port:
+                motor_port.write(b"0\n")
+                motor_port.close()
+        return
+
+    # ── SENDER / LOCAL MODE (Computer A with Spikerbox) ─────────
+    if not args.emg:
+        print("Error: --emg is required unless using --stream-host")
+        sys.exit(1)
 
     print(f"Connecting to Spikerbox on {args.emg}...")
     emg_port = serial.Serial(args.emg, EMG_BAUD, timeout=1)
     time.sleep(2)
     print("Spikerbox connected.")
 
-    if args.dry_run:
-        motor_port = None
-        print("DRY RUN — motor commands will be printed, not sent.")
-    else:
-        print(f"Connecting to motor Arduino on {args.motor} at {MOTOR_BAUD} baud...")
-        motor_port = serial.Serial(args.motor, MOTOR_BAUD, timeout=1)
-        time.sleep(2)
-        print("Motor Arduino connected.")
+    # TCP server for wireless streaming
+    stream_clients = []
+    stream_lock = threading.Lock()
+
+    if args.stream_port:
+        def stream_server():
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("", args.stream_port))
+            srv.listen(5)
+            print(f"[NET] Streaming on port {args.stream_port} — run on receiver: --stream-host <this-ip>:{args.stream_port}")
+            print(f"[NET] Your IP: run 'ipconfig getifaddr en0' to find it")
+            while True:
+                conn, addr = srv.accept()
+                print(f"[NET] Receiver connected: {addr}")
+                with stream_lock:
+                    stream_clients.append(conn)
+        threading.Thread(target=stream_server, daemon=True).start()
 
     processor = EMGProcessor()
     data_buffer = ""
@@ -184,7 +271,7 @@ def main():
                 print("\nQuitting...")
                 emg_port.close()
                 if motor_port:
-                    motor_port.write(b"0\n")  # return servo to 0 on quit
+                    motor_port.write(b"0\n")
                     motor_port.close()
                 if session_log:
                     fname = f"motor_session_{time.strftime('%Y%m%d_%H%M%S')}.csv"
@@ -234,6 +321,18 @@ def main():
                 session_log.append([round(now - session_start, 3), round(envelope, 5), round(avg_normalized, 4), degrees])
                 if motor_port:
                     motor_port.write(cmd.encode("utf-8"))
+                # broadcast to wireless receivers
+                if stream_clients:
+                    msg = f"{avg_normalized:.4f}\n".encode()
+                    with stream_lock:
+                        dead = []
+                        for c in stream_clients:
+                            try:
+                                c.sendall(msg)
+                            except OSError:
+                                dead.append(c)
+                        for c in dead:
+                            stream_clients.remove(c)
                 print(f"  EMG: {envelope:.4f} mV  activation: {avg_normalized:.0%}  → {degrees} degrees")
     except KeyboardInterrupt:
         print("\nStopped.")

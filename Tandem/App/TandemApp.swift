@@ -20,6 +20,7 @@ enum AppFlow: Hashable {
 struct TandemApp: App {
 
     @StateObject var serialManager = SerialManager()
+    @StateObject var networkManager = NetworkManager()
     @State private var flow: AppFlow = .welcome
 
     init() {
@@ -31,12 +32,14 @@ struct TandemApp: App {
         WindowGroup {
             rootView
                 .environmentObject(serialManager)
+                .environmentObject(networkManager)
         }
         .windowToolbarStyle(.unified(showsTitle: true))
 
         WindowGroup(id: "patient-window") {
             PatientView()
                 .environmentObject(serialManager)
+                .environmentObject(networkManager)
                 .frame(minWidth: 500, minHeight: 500)
         }
         .windowToolbarStyle(.unified(showsTitle: true))

@@ -6,9 +6,11 @@ import ORSSerial
 /// window, and broadcasts calibration completion to it via `SerialManager`.
 struct TherapistView: View {
     @EnvironmentObject var serialManager: SerialManager
+    @EnvironmentObject private var networkManager: NetworkManager
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var step: Step = .placement
+    @State private var wirelessEnabled: Bool = false
     @State private var baselinePhase: CapturePhase = .idle
     @State private var baselineSecondsRemaining: Int = 3
     @State private var baselineCountdownProgress: Double = 0
@@ -120,6 +122,8 @@ struct TherapistView: View {
             .frame(maxWidth: 480)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            wirelessSenderCard
 
             Button(action: { step = .calibrationBaseline }) {
                 Text("Continue")
@@ -489,6 +493,48 @@ struct TherapistView: View {
             }
         }
         .frame(maxWidth: 160)
+    }
+
+    @ViewBuilder
+    private var wirelessSenderCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: $wirelessEnabled) {
+                Label("Stream wirelessly to patient Mac", systemImage: "wifi")
+                    .font(.headline)
+            }
+            .onChange(of: wirelessEnabled) { _, enabled in
+                if enabled {
+                    serialManager.networkManager = networkManager
+                    networkManager.startSender()
+                } else {
+                    networkManager.stopSender()
+                    serialManager.networkManager = nil
+                }
+            }
+
+            if wirelessEnabled {
+                Divider()
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(networkManager.isConnected ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("This Mac: \(networkManager.localIP)  port \(networkManager.streamPort)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(networkManager.connectionStatus)
+                            .font(.subheadline)
+                            .foregroundStyle(networkManager.isConnected ? .primary : .secondary)
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 480)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .animation(.easeInOut(duration: 0.2), value: wirelessEnabled)
     }
 
     private var electrodePlacementPlaceholder: some View {
