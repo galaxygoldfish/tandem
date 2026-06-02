@@ -143,7 +143,7 @@ struct PatientSessionView: View {
                     set: { serialManager.maxServoDegrees = Int($0) }
                 ),
                 in: 0...180,
-                step: 18,
+                step: 9,
                 label: { Text("Intensity") },
                 minimumValueLabel: { Image(systemName: "bolt").padding(10) },
                 maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
