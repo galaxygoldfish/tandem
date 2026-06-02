@@ -83,6 +83,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
     private var lastActiveValue: Double = 0.0
     private let holdTime: Double = 1.0  // hold last position for 1s after flex ends
+    
+    /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
+    /// from the "Maximum stimulation strength" slider on the patient view.
+    @Published var maxServoDegrees: Int = 100
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -222,7 +226,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     ///   - "LEVEL:75" for 0-100 scale
     ///   - etc.
     private func sendTensCommand(_ level: Double) {
-        let degrees = Int(level * 100)
+        let degrees = Int(level * Double(maxServoDegrees))
         let command = "\(degrees)\n"
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "SEND → \(degrees) degrees"))

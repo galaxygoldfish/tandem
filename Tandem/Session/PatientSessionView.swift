@@ -2,12 +2,11 @@ import SwiftUI
 
 /// Patient's live view after the therapist completes calibration. Lets the
 /// patient toggle stimulation on/off (whole card is tappable), pick a maximum
-/// stimulation strength via a discrete 2-8 slider, watch the bicep-curl
-/// reference loop, and see the live TENS waveform.
+/// stimulation strength via a 0–180 slider that drives `maxServoDegrees`,
+/// watch the bicep-curl reference loop, and see the live TENS waveform.
 struct PatientSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = true
-    @State private var intensity: Double = 6
     @Environment(\.openWindow) private var openWindow
     
     // Track whether the waveform card is collapsed to dynamically resize the video
@@ -139,9 +138,12 @@ struct PatientSessionView: View {
                 .foregroundStyle(.secondary)
 
             Slider(
-                value: $intensity,
-                in: 2...8,
-                step: 1,
+                value: Binding(
+                    get: { Double(serialManager.maxServoDegrees) },
+                    set: { serialManager.maxServoDegrees = Int($0) }
+                ),
+                in: 0...180,
+                step: 18,
                 label: { Text("Intensity") },
                 minimumValueLabel: { Image(systemName: "bolt").padding(10) },
                 maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
@@ -151,8 +153,8 @@ struct PatientSessionView: View {
             .padding(.top, 8)
 
             HStack {
-                ForEach(2...8, id: \.self) { tick in
-                    Text("\(tick)")
+                ForEach(0...10, id: \.self) { tick in
+                    Text("\(tick * 10)%")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
