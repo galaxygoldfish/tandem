@@ -15,6 +15,7 @@ enum AppFlow: Hashable {
     // Telehealth
     case telehealthRole
     case telehealthExerciseSelect
+    case telehealthLinking(ExerciseSelectionView.Exercise)
     case telehealthTherapist(ExerciseSelectionView.Exercise)
     case telehealthPatient
 }
@@ -98,15 +99,21 @@ struct TandemApp: App {
                 .transition(.onboardingStep)
             case .telehealthExerciseSelect:
                 ExerciseSelectionView(
-                    onSelect: { selection in flow = .telehealthTherapist(selection) },
+                    onSelect: { selection in flow = .telehealthLinking(selection) },
                     onBack: { flow = .telehealthRole }
+                )
+                .transition(.onboardingStep)
+            case .telehealthLinking(let exercise):
+                TelehealthLinkingView(
+                    onLinked: { flow = .telehealthTherapist(exercise) },
+                    onBack: { flow = .telehealthExerciseSelect }
                 )
                 .transition(.onboardingStep)
             case .telehealthTherapist(let exercise):
                 TherapistView(
                     exercise: exercise,
                     isTelehealth: true,
-                    onBack: { flow = .telehealthRole }
+                    onBack: { flow = .telehealthLinking(exercise) }
                 )
                 .transition(.onboardingStep)
             case .telehealthPatient:

@@ -14,6 +14,20 @@ class NetworkManager: ObservableObject {
     @Published var connectionStatus: String = "Not connected"
     @Published var localIP: String = ""
     @Published var streamPort: UInt16 = 9000
+    /// Therapists advertised via Bonjour on the local network (receiver mode).
+    @Published var discoveredTherapists: [DiscoveredTherapist] = []
+    /// Name advertised to patients when in sender mode. Defaults to the Mac name.
+    @Published var therapistDisplayName: String = Host.current().localizedName ?? "Tandem Therapist"
+
+    /// Bonjour service type used to discover other Tandem therapists.
+    static let bonjourServiceType = "_tandem._tcp"
+
+    /// A therapist found on the local network via Bonjour.
+    struct DiscoveredTherapist: Identifiable, Hashable {
+        let id: String  // service name doubles as a stable id
+        let name: String
+        let endpoint: NWEndpoint
+    }
 
     /// Called on main thread when an activation value arrives (receiver mode).
     var onActivationReceived: ((Double) -> Void)?
@@ -23,10 +37,17 @@ class NetworkManager: ObservableObject {
     private var listener: NWListener?
     private var senderConnections: [NWConnection] = []
     private var receiverConnection: NWConnection?
+    private var browser: NWBrowser?
 
     // MARK: - Sender (therapist Mac)
 
     func startSender(port: UInt16 = 9000) {
+        // Idempotent: a separate "linking" view starts the sender before
+        // TherapistView appears, and TherapistView calls this again. Skip
+        // re-creating the listener when one is already running.
+        if listener != nil, wirelessMode == .sender {
+            return
+        }
         wirelessMode = .sender
         streamPort = port
         localIP = getLocalIP()
@@ -38,6 +59,11 @@ class NetworkManager: ObservableObject {
             return
         }
         listener = newListener
+        // Advertise the therapist on the local network so patients can find us.
+        newListener.service = NWListener.Service(
+            name: therapistDisplayName,
+            type: Self.bonjourServiceType
+        )
 
         newListener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: .global(qos: .userInitiated))
@@ -95,6 +121,71 @@ class NetworkManager: ObservableObject {
         for conn in senderConnections {
             conn.send(content: data, completion: .idempotent)
         }
+    }
+
+    // MARK: - Browse (patient Mac discovers therapists)
+
+    /// Starts a Bonjour browser that surfaces visible therapists into
+    /// `discoveredTherapists`. Safe to call repeatedly.
+    func startBrowsing() {
+        if browser != nil { return }
+        let descriptor = NWBrowser.Descriptor.bonjourWithTXTRecord(
+            type: Self.bonjourServiceType,
+            domain: nil
+        )
+        let newBrowser = NWBrowser(for: descriptor, using: NWParameters())
+        newBrowser.browseResultsChangedHandler = { [weak self] results, _ in
+            let mapped: [DiscoveredTherapist] = results.compactMap { result in
+                if case let .service(name, _, _, _) = result.endpoint {
+                    return DiscoveredTherapist(id: name, name: name, endpoint: result.endpoint)
+                }
+                return nil
+            }
+            .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            DispatchQueue.main.async {
+                self?.discoveredTherapists = mapped
+            }
+        }
+        newBrowser.start(queue: .global(qos: .userInitiated))
+        browser = newBrowser
+    }
+
+    func stopBrowsing() {
+        browser?.cancel()
+        browser = nil
+        discoveredTherapists = []
+    }
+
+    /// Connects to a therapist that was discovered via Bonjour. Mirrors
+    /// `startReceiver(host:port:)` but uses the resolved endpoint directly so
+    /// the patient never has to type an IP.
+    func connect(to therapist: DiscoveredTherapist) {
+        wirelessMode = .receiver
+        connectionStatus = "Connecting to \(therapist.name)..."
+
+        let conn = NWConnection(to: therapist.endpoint, using: .tcp)
+        receiverConnection = conn
+
+        conn.stateUpdateHandler = { [weak self] state in
+            DispatchQueue.main.async {
+                switch state {
+                case .ready:
+                    self?.isConnected = true
+                    self?.connectionStatus = "Connected to \(therapist.name)"
+                    if let conn = self?.receiverConnection {
+                        self?.receive(on: conn)
+                    }
+                case .failed(let error):
+                    self?.isConnected = false
+                    self?.connectionStatus = "Failed: \(error.localizedDescription)"
+                case .cancelled:
+                    self?.isConnected = false
+                    self?.connectionStatus = "Disconnected"
+                default: break
+                }
+            }
+        }
+        conn.start(queue: .global(qos: .userInitiated))
     }
 
     // MARK: - Receiver (patient Mac)
@@ -189,5 +280,6 @@ class NetworkManager: ObservableObject {
         listener?.cancel()
         senderConnections.forEach { $0.cancel() }
         receiverConnection?.cancel()
+        browser?.cancel()
     }
 }

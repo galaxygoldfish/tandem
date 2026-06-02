@@ -13,13 +13,13 @@ struct TelehealthRoleView: View {
             HStack(spacing: 20) {
                 roleCard(
                     title: "Therapist",
-                    subtitle: "I have the\nMuscle SpikerBox",
+                    subtitle: "",
                     systemImage: "waveform.path.ecg",
                     action: onTherapist
                 )
                 roleCard(
                     title: "Patient",
-                    subtitle: "I have the\nTENS unit",
+                    subtitle: "",
                     systemImage: "bolt.heart.fill",
                     action: onPatient
                 )
@@ -28,7 +28,7 @@ struct TelehealthRoleView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .navigationTitle("Tandem — Telehealth")
+        .navigationTitle("Tandem")
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .navigation) {

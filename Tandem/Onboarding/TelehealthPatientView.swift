@@ -7,7 +7,7 @@ struct TelehealthPatientView: View {
 
     enum Step { case connect, waiting, session }
     @State private var step: Step = .connect
-    @State private var senderIP: String = ""
+    @State private var selectedTherapist: NetworkManager.DiscoveredTherapist?
 
     var body: some View {
         Group {
@@ -36,37 +36,35 @@ struct TelehealthPatientView: View {
                 .foregroundStyle(.secondary)
             Text("Patient — Telehealth")
                 .font(.title.bold())
-            Text("Enter your therapist's IP address to connect")
+            Text("Choose your therapist from the list below")
                 .foregroundStyle(.secondary)
-            Spacer()
-            VStack(spacing: 16) {
-                TextField("Therapist's IP (e.g. 192.168.1.5)", text: $senderIP)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 340)
-                Button("Connect") {
-                    networkManager.onActivationReceived = { value in
-                        serialManager.receiveRemoteActivation(value)
+
+            VStack(spacing: 12) {
+                if networkManager.discoveredTherapists.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Looking for therapists on this network…")
+                            .foregroundStyle(.secondary)
                     }
-                    networkManager.onCalibrationReceived = {
-                        withAnimation(.onboardingSpring) {
-                            step = .session
-                        }
+                    .padding(.vertical, 24)
+                } else {
+                    ForEach(networkManager.discoveredTherapists) { therapist in
+                        therapistRow(therapist)
                     }
-                    networkManager.startReceiver(host: senderIP)
-                    step = .waiting
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                .disabled(senderIP.isEmpty)
             }
-            .padding(24)
+            .padding(20)
+            .frame(maxWidth: 480)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .frame(maxWidth: 480)
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .onAppear { networkManager.startBrowsing() }
+        .onDisappear { networkManager.stopBrowsing() }
         .navigationTitle("Tandem — Telehealth")
         .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -81,6 +79,41 @@ struct TelehealthPatientView: View {
             }
             .sharedBackgroundVisibility(.hidden)
         }
+    }
+
+    private func therapistRow(_ therapist: NetworkManager.DiscoveredTherapist) -> some View {
+        Button(action: { connect(to: therapist) }) {
+            HStack(spacing: 12) {
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundStyle(.primary)
+                Text(therapist.name)
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func connect(to therapist: NetworkManager.DiscoveredTherapist) {
+        selectedTherapist = therapist
+        networkManager.onActivationReceived = { value in
+            serialManager.receiveRemoteActivation(value)
+        }
+        networkManager.onCalibrationReceived = {
+            withAnimation(.onboardingSpring) {
+                step = .session
+            }
+        }
+        networkManager.connect(to: therapist)
+        step = .waiting
     }
 
     private var waitingBody: some View {
@@ -98,7 +131,7 @@ struct TelehealthPatientView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
             } else {
-                Text("Connecting to \(senderIP)...")
+                Text("Connecting to \(selectedTherapist?.name ?? "therapist")…")
                     .font(.title2.bold())
             }
             Spacer()

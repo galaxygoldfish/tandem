@@ -8,21 +8,24 @@ struct ModeSelectionView: View {
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            Text("How will you use Tandem?")
-                .font(.title.bold())
-            Text("Choose how the therapist and patient are connected")
-                .foregroundStyle(.secondary)
+            VStack(alignment: .center, spacing: 15) {
+                Text("How will you use Tandem?")
+                    .font(.title.bold())
+                Text("Choose how you'll connect with your therapist at today's appointment")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
             HStack(spacing: 20) {
                 modeCard(
-                    title: "Local",
-                    subtitle: "Both devices connected\nto this Mac",
-                    systemImage: "cable.connector",
+                    title: "In the clinic",
+                    subtitle: "You're at an in-person physical therapy appointment with your clinician",
+                    systemImage: "stethoscope",
                     action: onLocal
                 )
                 modeCard(
                     title: "Telehealth",
-                    subtitle: "Therapist and patient\non separate Macs",
-                    systemImage: "wifi",
+                    subtitle: "You're attending your appointment virtually and you have the device with you",
+                    systemImage: "video.fill",
                     action: onTelehealth
                 )
             }
