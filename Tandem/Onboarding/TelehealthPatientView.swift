@@ -8,6 +8,7 @@ struct TelehealthPatientView: View {
     enum Step { case connect, waiting, session }
     @State private var step: Step = .connect
     @State private var selectedTherapist: NetworkManager.DiscoveredTherapist?
+    @State private var showSuccess = false
 
     var body: some View {
         Group {
@@ -21,9 +22,17 @@ struct TelehealthPatientView: View {
             }
         }
         .animation(.onboardingSpring, value: step)
+        .animation(.easeInOut(duration: 0.25), value: showSuccess)
         .onChange(of: networkManager.isConnected) { _, connected in
+            if connected && step == .waiting && !showSuccess {
+                showSuccess = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    showSuccess = false
+                }
+            }
             if !connected && step == .waiting {
                 step = .connect
+                showSuccess = false
             }
         }
     }
@@ -33,10 +42,10 @@ struct TelehealthPatientView: View {
             Spacer()
             Image(systemName: "wifi")
                 .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("Patient — Telehealth")
+                .padding(.bottom, 10)
+            Text("Link to therapist")
                 .font(.title.bold())
-            Text("Choose your therapist from the list below")
+            Text("Choose your therapist from the list below to continue")
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 12) {
@@ -116,42 +125,60 @@ struct TelehealthPatientView: View {
         step = .waiting
     }
 
+    @ViewBuilder
     private var waitingBody: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            ProgressView()
-                .controlSize(.large)
-            if networkManager.isConnected {
-                Text("Waiting for therapist to calibrate")
-                    .font(.title2.bold())
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-                Text("The session will begin automatically once calibration is complete")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-            } else {
-                Text("Connecting to \(selectedTherapist?.name ?? "therapist")…")
-                    .font(.title2.bold())
+        if showSuccess {
+            ConnectionSuccessView(
+                title: "Connected to \(selectedTherapist?.name ?? "therapist")"
+            )
+            .transition(.opacity)
+            .navigationTitle("Tandem — Telehealth")
+            .toolbar(removing: .title)
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Color.clear.frame(height: 40)
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
-            Spacer()
-            Button("Disconnect") {
-                networkManager.stopReceiver()
-                step = .connect
+        } else {
+            VStack(spacing: 24) {
+                Spacer()
+                ProgressView()
+                    .controlSize(.large)
+                if networkManager.isConnected {
+                    Text("Waiting for therapist to calibrate")
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
+                    Text("The session will begin automatically once calibration is complete")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
+                } else {
+                    Text("Connecting to \(selectedTherapist?.name ?? "therapist")…")
+                        .font(.title2.bold())
+                }
+                Spacer()
+                Button("Disconnect") {
+                    networkManager.stopReceiver()
+                    step = .connect
+                }
+                .foregroundStyle(.secondary)
+                Spacer()
             }
-            .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
-        .navigationTitle("Tandem — Telehealth")
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Color.clear.frame(height: 40)
+            .transition(.opacity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+            .navigationTitle("Tandem — Telehealth")
+            .toolbar(removing: .title)
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Color.clear.frame(height: 40)
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
-            .sharedBackgroundVisibility(.hidden)
         }
     }
 }

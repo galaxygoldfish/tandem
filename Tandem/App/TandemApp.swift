@@ -14,8 +14,8 @@ enum AppFlow: Hashable {
     case therapist(ExerciseSelectionView.Exercise)
     // Telehealth
     case telehealthRole
+    case telehealthLinking
     case telehealthExerciseSelect
-    case telehealthLinking(ExerciseSelectionView.Exercise)
     case telehealthTherapist(ExerciseSelectionView.Exercise)
     case telehealthPatient
 }
@@ -92,28 +92,28 @@ struct TandemApp: App {
                 .transition(.onboardingStep)
             case .telehealthRole:
                 TelehealthRoleView(
-                    onTherapist: { flow = .telehealthExerciseSelect },
+                    onTherapist: { flow = .telehealthLinking },
                     onPatient: { flow = .telehealthPatient },
                     onBack: { flow = .modeSelect }
                 )
                 .transition(.onboardingStep)
-            case .telehealthExerciseSelect:
-                ExerciseSelectionView(
-                    onSelect: { selection in flow = .telehealthLinking(selection) },
+            case .telehealthLinking:
+                TelehealthLinkingView(
+                    onLinked: { flow = .telehealthExerciseSelect },
                     onBack: { flow = .telehealthRole }
                 )
                 .transition(.onboardingStep)
-            case .telehealthLinking(let exercise):
-                TelehealthLinkingView(
-                    onLinked: { flow = .telehealthTherapist(exercise) },
-                    onBack: { flow = .telehealthExerciseSelect }
+            case .telehealthExerciseSelect:
+                ExerciseSelectionView(
+                    onSelect: { selection in flow = .telehealthTherapist(selection) },
+                    onBack: { flow = .telehealthLinking }
                 )
                 .transition(.onboardingStep)
             case .telehealthTherapist(let exercise):
                 TherapistView(
                     exercise: exercise,
                     isTelehealth: true,
-                    onBack: { flow = .telehealthLinking(exercise) }
+                    onBack: { flow = .telehealthExerciseSelect }
                 )
                 .transition(.onboardingStep)
             case .telehealthPatient:

@@ -16,8 +16,23 @@ class NetworkManager: ObservableObject {
     @Published var streamPort: UInt16 = 9000
     /// Therapists advertised via Bonjour on the local network (receiver mode).
     @Published var discoveredTherapists: [DiscoveredTherapist] = []
-    /// Name advertised to patients when in sender mode. Defaults to the Mac name.
-    @Published var therapistDisplayName: String = Host.current().localizedName ?? "Tandem Therapist"
+    /// Name advertised to patients when in sender mode. Persists across launches
+    /// via `UserDefaults`. Setting this while a listener is live re-publishes
+    /// the Bonjour service so patients see the new name immediately.
+    @Published var therapistDisplayName: String {
+        didSet {
+            UserDefaults.standard.set(therapistDisplayName, forKey: Self.therapistNameKey)
+            let trimmed = therapistDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let listener, !trimmed.isEmpty {
+                listener.service = NWListener.Service(
+                    name: trimmed,
+                    type: Self.bonjourServiceType
+                )
+            }
+        }
+    }
+
+    private static let therapistNameKey = "tandemTherapistName"
 
     /// Bonjour service type used to discover other Tandem therapists.
     static let bonjourServiceType = "_tandem._tcp"
@@ -38,6 +53,12 @@ class NetworkManager: ObservableObject {
     private var senderConnections: [NWConnection] = []
     private var receiverConnection: NWConnection?
     private var browser: NWBrowser?
+
+    init() {
+        let stored = UserDefaults.standard.string(forKey: Self.therapistNameKey)
+        let fallback = Host.current().localizedName ?? "Tandem Therapist"
+        self.therapistDisplayName = (stored?.isEmpty == false ? stored : nil) ?? fallback
+    }
 
     // MARK: - Sender (therapist Mac)
 
@@ -60,8 +81,10 @@ class NetworkManager: ObservableObject {
         }
         listener = newListener
         // Advertise the therapist on the local network so patients can find us.
+        let trimmed = therapistDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let advertisedName = trimmed.isEmpty ? "Tandem Therapist" : trimmed
         newListener.service = NWListener.Service(
-            name: therapistDisplayName,
+            name: advertisedName,
             type: Self.bonjourServiceType
         )
 

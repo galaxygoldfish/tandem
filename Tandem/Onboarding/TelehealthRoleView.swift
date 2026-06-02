@@ -8,19 +8,22 @@ struct TelehealthRoleView: View {
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            Text("I am the...")
+            Text("I'm the...")
                 .font(.title.bold())
+            Spacer()
             HStack(spacing: 20) {
                 roleCard(
                     title: "Therapist",
                     subtitle: "",
                     systemImage: "waveform.path.ecg",
+                    color: .blue.opacity(0.5),
                     action: onTherapist
                 )
                 roleCard(
                     title: "Patient",
                     subtitle: "",
-                    systemImage: "bolt.heart.fill",
+                    systemImage: "bolt.fill",
+                    color: .purple.opacity(0.5),
                     action: onPatient
                 )
             }
@@ -43,22 +46,24 @@ struct TelehealthRoleView: View {
         }
     }
 
-    private func roleCard(title: String, subtitle: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func roleCard(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             VStack(spacing: 16) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 40))
+                    .font(.system(size: 80))
                     .foregroundStyle(.primary)
                 Text(title)
-                    .font(.title2.bold())
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                    .font(.title)
             }
             .frame(width: 220, height: 180)
             .padding(20)
-            .background(.ultraThinMaterial)
+            .background(color)
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)

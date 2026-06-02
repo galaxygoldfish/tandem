@@ -6,10 +6,35 @@ import SwiftUI
 struct TelehealthLinkingView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var networkManager: NetworkManager
+    @State private var showSuccess = false
     var onLinked: () -> Void
     var onBack: () -> Void
 
     var body: some View {
+        Group {
+            if showSuccess {
+                ConnectionSuccessView(title: "Connected to patient")
+                    .transition(.opacity)
+            } else {
+                waitingBody
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showSuccess)
+        .onAppear {
+            serialManager.networkManager = networkManager
+            networkManager.startSender()
+        }
+        .onChange(of: networkManager.isConnected) { _, connected in
+            guard connected, !showSuccess else { return }
+            showSuccess = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                onLinked()
+            }
+        }
+    }
+
+    private var waitingBody: some View {
         VStack(spacing: 24) {
             Spacer()
             ProgressView()
@@ -18,13 +43,16 @@ struct TelehealthLinkingView: View {
                 .font(.title.bold())
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
-            Text("Patients on this network will see this Mac as")
+            Text("Patients on this network see you as")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text(networkManager.therapistDisplayName)
+            TextField("Display name", text: $networkManager.therapistDisplayName)
+                .textFieldStyle(.plain)
                 .font(.title3.bold())
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+                .frame(maxWidth: 360)
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Spacer()
@@ -35,15 +63,6 @@ struct TelehealthLinkingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .onAppear {
-            serialManager.networkManager = networkManager
-            networkManager.startSender()
-        }
-        .onChange(of: networkManager.isConnected) { _, connected in
-            if connected {
-                onLinked()
-            }
-        }
         .navigationTitle("Tandem — Telehealth")
         .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
