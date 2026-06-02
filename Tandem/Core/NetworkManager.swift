@@ -15,8 +15,10 @@ class NetworkManager: ObservableObject {
     @Published var localIP: String = ""
     @Published var streamPort: UInt16 = 9000
 
-    /// Set by the patient view before calling startReceiver. Called on main thread.
+    /// Called on main thread when an activation value arrives (receiver mode).
     var onActivationReceived: ((Double) -> Void)?
+    /// Called on main thread when the therapist finishes calibration (receiver mode).
+    var onCalibrationReceived: (() -> Void)?
 
     private var listener: NWListener?
     private var senderConnections: [NWConnection] = []
@@ -77,6 +79,13 @@ class NetworkManager: ObservableObject {
         wirelessMode = .none
         isConnected = false
         connectionStatus = "Not connected"
+    }
+
+    func sendCalibrationComplete() {
+        guard let data = "CALIBRATED\n".data(using: .utf8) else { return }
+        for conn in senderConnections {
+            conn.send(content: data, completion: .idempotent)
+        }
     }
 
     /// Called from SerialManager.processNewValue() on the main thread.
@@ -146,7 +155,10 @@ class NetworkManager: ObservableObject {
                 var lines = newBuffer.components(separatedBy: "\n")
                 newBuffer = lines.removeLast()
                 for line in lines {
-                    if let value = Double(line.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if clean == "CALIBRATED" {
+                        DispatchQueue.main.async { self.onCalibrationReceived?() }
+                    } else if let value = Double(clean) {
                         DispatchQueue.main.async { self.onActivationReceived?(value) }
                     }
                 }

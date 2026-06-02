@@ -21,6 +21,7 @@ struct TherapistView: View {
     /// re-tile it even after the patient window steals key/main status.
     @State private var hostWindow: NSWindow?
     var exercise: ExerciseSelectionView.Exercise
+    var isTelehealth: Bool = false
     var onBack: () -> Void
 
     /// Onboarding sub-steps inside the therapist window.
@@ -62,21 +63,27 @@ struct TherapistView: View {
             }
         }
         .animation(.onboardingSpring, value: step)
-        .background(WindowAccessor { window in
-            hostWindow = window
-            tileWindow(window, to: .left)
+        .background(Group {
+            if !isTelehealth {
+                WindowAccessor { window in
+                    hostWindow = window
+                    tileWindow(window, to: .left)
+                }
+            }
         })
         .onAppear {
             serialManager.calibrationCompleted = false
             serialManager.baselineMV = nil
             serialManager.mvcMV = nil
-            openWindow(id: "patient-window")
-            // Re-tile the therapist's own window after the patient window has
-            // had a chance to open, in case the initial tile ran before the
-            // window was fully attached.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if let window = hostWindow {
-                    tileWindow(window, to: .left)
+            if isTelehealth {
+                serialManager.networkManager = networkManager
+                networkManager.startSender()
+            } else {
+                openWindow(id: "patient-window")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if let window = hostWindow {
+                        tileWindow(window, to: .left)
+                    }
                 }
             }
         }
@@ -123,7 +130,11 @@ struct TherapistView: View {
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            wirelessSenderCard
+            if isTelehealth {
+                telehealthSenderStatusCard
+            } else {
+                wirelessSenderCard
+            }
 
             Button(action: { step = .calibrationBaseline }) {
                 Text("Continue")
@@ -143,7 +154,12 @@ struct TherapistView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: {
-                    dismissWindow(id: "patient-window")
+                    if isTelehealth {
+                        networkManager.stopSender()
+                        serialManager.networkManager = nil
+                    } else {
+                        dismissWindow(id: "patient-window")
+                    }
                     onBack()
                 }) {
                     Image(systemName: "chevron.left")
@@ -480,6 +496,7 @@ struct TherapistView: View {
             }
             try? await Task.sleep(for: .seconds(1))
             serialManager.calibrationCompleted = true
+            if isTelehealth { networkManager.sendCalibrationComplete() }
             step = .session
         }
     }
@@ -493,6 +510,29 @@ struct TherapistView: View {
             }
         }
         .frame(maxWidth: 160)
+    }
+
+    private var telehealthSenderStatusCard: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(networkManager.isConnected ? Color.green : Color.orange)
+                .frame(width: 10, height: 10)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Streaming to patient Mac")
+                    .font(.headline)
+                Text("This Mac: \(networkManager.localIP)  ·  port \(networkManager.streamPort)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(networkManager.connectionStatus)
+                    .font(.subheadline)
+                    .foregroundStyle(networkManager.isConnected ? .primary : .secondary)
+            }
+            Spacer()
+        }
+        .padding(20)
+        .frame(maxWidth: 480)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder

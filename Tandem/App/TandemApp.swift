@@ -7,9 +7,16 @@ import ORSSerial
 /// for the chosen exercise or the developer dashboard.
 enum AppFlow: Hashable {
     case welcome
+    case modeSelect
+    // Local
     case connect
     case exerciseSelect
     case therapist(ExerciseSelectionView.Exercise)
+    // Telehealth
+    case telehealthRole
+    case telehealthExerciseSelect
+    case telehealthTherapist(ExerciseSelectionView.Exercise)
+    case telehealthPatient
 }
 
 /// App entry point. Hosts three scenes:
@@ -55,12 +62,19 @@ struct TandemApp: App {
         Group {
             switch flow {
             case .welcome:
-                WelcomeView(onStart: { flow = .connect })
+                WelcomeView(onStart: { flow = .modeSelect })
                     .transition(.onboardingStep)
+            case .modeSelect:
+                ModeSelectionView(
+                    onLocal: { flow = .connect },
+                    onTelehealth: { flow = .telehealthRole },
+                    onBack: { flow = .welcome }
+                )
+                .transition(.onboardingStep)
             case .connect:
                 HardwareConnectionView(
                     onContinue: { flow = .exerciseSelect },
-                    onBack: { flow = .welcome }
+                    onBack: { flow = .modeSelect }
                 )
                 .transition(.onboardingStep)
             case .exerciseSelect:
@@ -75,6 +89,29 @@ struct TandemApp: App {
                     onBack: { flow = .exerciseSelect }
                 )
                 .transition(.onboardingStep)
+            case .telehealthRole:
+                TelehealthRoleView(
+                    onTherapist: { flow = .telehealthExerciseSelect },
+                    onPatient: { flow = .telehealthPatient },
+                    onBack: { flow = .modeSelect }
+                )
+                .transition(.onboardingStep)
+            case .telehealthExerciseSelect:
+                ExerciseSelectionView(
+                    onSelect: { selection in flow = .telehealthTherapist(selection) },
+                    onBack: { flow = .telehealthRole }
+                )
+                .transition(.onboardingStep)
+            case .telehealthTherapist(let exercise):
+                TherapistView(
+                    exercise: exercise,
+                    isTelehealth: true,
+                    onBack: { flow = .telehealthRole }
+                )
+                .transition(.onboardingStep)
+            case .telehealthPatient:
+                TelehealthPatientView(onBack: { flow = .telehealthRole })
+                    .transition(.onboardingStep)
             }
         }
         .animation(.onboardingSpring, value: flow)
