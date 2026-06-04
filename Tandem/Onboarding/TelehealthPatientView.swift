@@ -154,6 +154,9 @@ struct TelehealthPatientView: View {
         networkManager.onRepCountReceived = { count in
             serialManager.repCount = count
         }
+        networkManager.onTargetRepsReceived = { count in
+            serialManager.targetReps = count
+        }
         networkManager.connect(to: therapist)
         step = .waiting
     }

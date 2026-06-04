@@ -59,6 +59,8 @@ class NetworkManager: ObservableObject {
     var onCalibrationReceived: (() -> Void)?
     /// Called on main thread when the therapist updates the rep count (receiver mode).
     var onRepCountReceived: ((Int) -> Void)?
+    /// Called on main thread when the therapist updates the target reps (receiver mode).
+    var onTargetRepsReceived: ((Int) -> Void)?
 
     private var listener: NWListener?
     private var senderConnections: [NWConnection] = []
@@ -165,6 +167,13 @@ class NetworkManager: ObservableObject {
 
     func sendRepCount(_ count: Int) {
         guard let data = "REPS:\(count)\n".data(using: .utf8) else { return }
+        for conn in senderConnections {
+            conn.send(content: data, completion: .idempotent)
+        }
+    }
+
+    func sendTargetReps(_ count: Int) {
+        guard let data = "TARGET:\(count)\n".data(using: .utf8) else { return }
         for conn in senderConnections {
             conn.send(content: data, completion: .idempotent)
         }
@@ -320,6 +329,8 @@ class NetworkManager: ObservableObject {
                         DispatchQueue.main.async { self.onCalibrationReceived?() }
                     } else if clean.hasPrefix("REPS:"), let count = Int(clean.dropFirst(5)) {
                         DispatchQueue.main.async { self.onRepCountReceived?(count) }
+                    } else if clean.hasPrefix("TARGET:"), let count = Int(clean.dropFirst(7)) {
+                        DispatchQueue.main.async { self.onTargetRepsReceived?(count) }
                     } else if let value = Double(clean) {
                         DispatchQueue.main.async { self.onActivationReceived?(value) }
                     }

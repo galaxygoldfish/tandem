@@ -62,6 +62,14 @@ struct RepCounterCard: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(serialManager.repCount == 0)
+
+                    Button(role: .destructive, action: { serialManager.resetReps() }) {
+                        Label("Clear", systemImage: "xmark")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(serialManager.repCount == 0)
                 }
                 .padding(.top, 2)
             }

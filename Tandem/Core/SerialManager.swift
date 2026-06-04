@@ -93,7 +93,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     // MARK: - Rep Counter
     @Published var repCount: Int = 0
-    @Published var targetReps: Int = 10
+    @Published var targetReps: Int = 10 {
+        didSet { networkManager?.sendTargetReps(targetReps) }
+    }
 
     private enum RepState { case armed, locked }
     private var repState: RepState = .armed
