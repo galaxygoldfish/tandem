@@ -250,12 +250,17 @@ class NetworkManager: ObservableObject {
                 case .ready:
                     self?.isConnected = true
                     self?.connectionStatus = "Connected to \(therapist.name)"
+                    // Keep the browser alive through resolution, then drop it
+                    // once the TCP connection is up — canceling earlier can
+                    // strand the mDNS resolver and stall the first connect.
+                    self?.stopBrowsing()
                     if let conn = self?.receiverConnection {
                         self?.receive(on: conn)
                     }
                 case .failed(let error):
                     self?.isConnected = false
                     self?.connectionStatus = "Failed: \(error.localizedDescription)"
+                    self?.stopBrowsing()
                 case .cancelled:
                     self?.isConnected = false
                     self?.connectionStatus = "Disconnected"

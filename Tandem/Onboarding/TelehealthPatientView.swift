@@ -79,7 +79,6 @@ struct TelehealthPatientView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .onAppear { networkManager.startBrowsing() }
-        .onDisappear { networkManager.stopBrowsing() }
         .alert("Enter therapist code", isPresented: $showCodePrompt) {
             TextField("ABCD", text: $codeInput)
             Button("Cancel", role: .cancel) { }
@@ -97,7 +96,10 @@ struct TelehealthPatientView: View {
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button(action: onBack) {
+                Button(action: {
+                    networkManager.stopBrowsing()
+                    onBack()
+                }) {
                     Image(systemName: "chevron.left")
                 }
             }

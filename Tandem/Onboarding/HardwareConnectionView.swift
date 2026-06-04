@@ -39,14 +39,14 @@ struct HardwareConnectionView: View {
             Spacer()
             VStack(spacing: 16) {
                 deviceRow(
-                    name: "Muscle SpikerBox",
+                    name: "Therapist unit",
                     imageName: "SpikerBox",
                     isConnected: serialManager.isConnected,
                     statusText: spikerBoxStatusText
                 )
                 Divider()
                 deviceRow(
-                    name: "TENS Unit",
+                    name: "Patient unit",
                     imageName: "TensUnit",
                     isConnected: serialManager.isTensConnected,
                     statusText: tensStatusText
@@ -94,6 +94,7 @@ struct HardwareConnectionView: View {
             Circle()
                 .fill(isConnected ? Color.green : Color.red)
                 .frame(width: 12, height: 12)
+                .padding(.leading, 5)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(.headline)
