@@ -132,8 +132,6 @@ struct TherapistView: View {
 
             if isTelehealth {
                 telehealthSenderStatusCard
-            } else {
-                wirelessSenderCard
             }
 
             Button(action: { step = .calibrationBaseline }) {

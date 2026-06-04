@@ -72,8 +72,6 @@ struct PatientView: View {
                 statusText: tensStatusText
             )
 
-            wirelessReceiverCard
-
             Button(action: { step = .waiting }) {
                 Text("Continue")
                     .frame(minWidth: 120)
