@@ -9,6 +9,9 @@ struct TelehealthPatientView: View {
     @State private var step: Step = .connect
     @State private var selectedTherapist: NetworkManager.DiscoveredTherapist?
     @State private var showSuccess = false
+    @State private var showCodePrompt = false
+    @State private var codeInput = ""
+    @State private var showCodeNotFound = false
 
     var body: some View {
         Group {
@@ -40,21 +43,19 @@ struct TelehealthPatientView: View {
     private var connectBody: some View {
         VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "wifi")
+            Image(systemName: "person.line.dotted.person")
                 .font(.system(size: 48))
                 .padding(.bottom, 10)
             Text("Link to therapist")
                 .font(.title.bold())
             Text("Choose your therapist from the list below to continue")
                 .foregroundStyle(.secondary)
-
+            Spacer()
             VStack(spacing: 12) {
                 if networkManager.discoveredTherapists.isEmpty {
                     HStack(spacing: 10) {
                         ProgressView()
-                            .controlSize(.small)
-                        Text("Looking for therapists on this network…")
-                            .foregroundStyle(.secondary)
+                            .controlSize(.large)
                     }
                     .padding(.vertical, 24)
                 } else {
@@ -65,16 +66,33 @@ struct TelehealthPatientView: View {
             }
             .padding(20)
             .frame(maxWidth: 480)
-            .background(.ultraThinMaterial)
+            .background(.clear)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-
+            Button("Try another way") {
+                codeInput = ""
+                showCodePrompt = true
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.red)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .onAppear { networkManager.startBrowsing() }
         .onDisappear { networkManager.stopBrowsing() }
-        .navigationTitle("Tandem — Telehealth")
+        .alert("Enter therapist code", isPresented: $showCodePrompt) {
+            TextField("ABCD", text: $codeInput)
+            Button("Cancel", role: .cancel) { }
+            Button("Link") { submitCode() }
+        } message: {
+            Text("Ask your therapist for the 4 letter code shown at the bottom of their screen.")
+        }
+        .alert("No therapist found", isPresented: $showCodeNotFound) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("No therapist on this network is using that code. Double-check the code and make sure both Macs are on the same network.")
+        }
+        .navigationTitle("Tandem")
         .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
@@ -92,14 +110,18 @@ struct TelehealthPatientView: View {
 
     private func therapistRow(_ therapist: NetworkManager.DiscoveredTherapist) -> some View {
         Button(action: { connect(to: therapist) }) {
-            HStack(spacing: 12) {
-                Image(systemName: "waveform.path.ecg")
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "person")
                     .foregroundStyle(.primary)
+                    .padding(10)
+                    .font(.system(size: 24))
                 Text(therapist.name)
-                    .font(.headline)
+                    .font(.title2)
                 Spacer()
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.secondary)
+                    .padding(10)
+                    .font(.system(size: 16))
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 16)
@@ -109,6 +131,14 @@ struct TelehealthPatientView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+    }
+
+    private func submitCode() {
+        if let match = networkManager.therapist(withCode: codeInput) {
+            connect(to: match)
+        } else {
+            showCodeNotFound = true
+        }
     }
 
     private func connect(to therapist: NetworkManager.DiscoveredTherapist) {
@@ -132,7 +162,7 @@ struct TelehealthPatientView: View {
                 title: "Connected to \(selectedTherapist?.name ?? "therapist")"
             )
             .transition(.opacity)
-            .navigationTitle("Tandem — Telehealth")
+            .navigationTitle("Tandem")
             .toolbar(removing: .title)
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             .toolbar {
@@ -170,7 +200,7 @@ struct TelehealthPatientView: View {
             .transition(.opacity)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
-            .navigationTitle("Tandem — Telehealth")
+            .navigationTitle("Tandem ")
             .toolbar(removing: .title)
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             .toolbar {

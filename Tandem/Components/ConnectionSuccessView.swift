@@ -25,6 +25,7 @@ struct ConnectionSuccessView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
                 .opacity(didAppear ? 1.0 : 0)
+                .padding(.top, 20)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

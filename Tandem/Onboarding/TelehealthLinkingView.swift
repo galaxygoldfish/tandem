@@ -37,8 +37,9 @@ struct TelehealthLinkingView: View {
     private var waitingBody: some View {
         VStack(spacing: 24) {
             Spacer()
-            ProgressView()
-                .controlSize(.large)
+            Image(systemName: "person.line.dotted.person")
+                .font(.system(size: 48))
+                .padding(.bottom, 10)
             Text("Waiting to link to patient")
                 .font(.title.bold())
                 .multilineTextAlignment(.center)
@@ -56,14 +57,17 @@ struct TelehealthLinkingView: View {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Spacer()
-            Text(networkManager.connectionStatus)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            ProgressView()
+                .controlSize(.large)
             Spacer()
+            Text("Link code: \(networkManager.sessionCode)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .navigationTitle("Tandem — Telehealth")
+        .navigationTitle("Tandem")
         .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
