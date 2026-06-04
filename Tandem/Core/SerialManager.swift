@@ -220,6 +220,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Called by the patient Mac when receiving activation values wirelessly.
     /// Applies hold time logic and drives the TENS/servo, mirroring processNewValue's send path.
     func receiveRemoteActivation(_ value: Double) {
+        // Abort gates remote drive too: if stimulation is off we silently drop
+        // network-supplied activations so the servo stays parked at 0°.
+        guard isTensEnabled else { return }
         let sensoryThreshold = 0.15
         let now = Date()
         if value >= sensoryThreshold {
@@ -232,6 +235,28 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         sendTensCommand(tensLevel)
         normalizedStrength = value
         tensOutput = tensLevel
+    }
+
+    /// Emergency stop: cuts new stimulation commands and parks the servo at
+    /// 0° right now. Sends the zero command three times in rapid succession so
+    /// it's robust to a dropped serial packet, and clears the hold-time state
+    /// so the next legitimate activation has to re-trigger from rest.
+    func hardStop() {
+        isTensEnabled = false
+        tensWindowSamples.removeAll()
+        lastActiveValue = 0.0
+        lastActiveTime = Date(timeIntervalSince1970: 0)
+        normalizedStrength = 0.0
+        tensOutput = 0.0
+        // Send the zero command synchronously on the port, bypassing the
+        // periodic throttle in processNewValue / receiveRemoteActivation.
+        let zero = "0\n".data(using: .utf8) ?? Data()
+        for _ in 0..<3 {
+            tensPort?.send(zero)
+        }
+        DispatchQueue.main.async {
+            self.logs.append(LogEntry(text: "ABORT — servo parked at 0°"))
+        }
     }
 
     /// Send TENS command to the device. Currently logs the command; integrate actual TENS hardware here.

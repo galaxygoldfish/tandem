@@ -61,7 +61,7 @@ struct PatientSessionView: View {
     }
 
     private var abortButton: some View {
-        Button(action: { serialManager.isTensEnabled = false }) {
+        Button(action: { serialManager.hardStop() }) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.octagon.fill")
                 Text("ABORT")
