@@ -42,6 +42,10 @@ struct TherapistSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 20)
 
+            RepCounterCard(isEditable: true)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+
             if !serialManager.isConsolePoppedOut {
                 consolePanel
             }

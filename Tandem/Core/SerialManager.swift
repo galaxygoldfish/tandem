@@ -91,6 +91,15 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// from the "Maximum stimulation strength" slider on the patient view.
     @Published var maxServoDegrees: Int = 100
 
+    // MARK: - Rep Counter
+    @Published var repCount: Int = 0
+    @Published var targetReps: Int = 10
+
+    private enum RepState { case armed, locked }
+    private var repState: RepState = .armed
+    private let repThreshold: Double = 0.65
+    private let repResetThreshold: Double = 0.40
+
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
         case none
@@ -215,6 +224,36 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         guard normalized >= sensoryThreshold else { return 0.0 }
         let safeNormalized = max(0.0, min(1.0, normalized))
         return safeNormalized
+    }
+
+    // MARK: - Rep Counting
+
+    private func checkRep(_ activation: Double) {
+        switch repState {
+        case .armed:
+            if activation >= repThreshold && repCount < targetReps {
+                repCount += 1
+                repState = .locked
+                networkManager?.sendRepCount(repCount)
+            }
+        case .locked:
+            if activation < repResetThreshold {
+                repState = .armed
+            }
+        }
+    }
+
+    func undoLastRep() {
+        guard repCount > 0 else { return }
+        repCount -= 1
+        repState = .armed
+        networkManager?.sendRepCount(repCount)
+    }
+
+    func resetReps() {
+        repCount = 0
+        repState = .armed
+        networkManager?.sendRepCount(0)
     }
 
     /// Called by the patient Mac when receiving activation values wirelessly.
@@ -420,6 +459,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             let sendValue = avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
             sendTensCommand(mapToTensLevel(sendValue))
             networkManager?.sendActivation(avgNormalized)
+            if calibrationMode == .none {
+                checkRep(avgNormalized)
+            }
         }
 
         // Update UI with latest values.

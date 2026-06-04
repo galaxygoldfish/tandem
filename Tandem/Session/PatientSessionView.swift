@@ -26,6 +26,11 @@ struct PatientSessionView: View {
 
             Spacer()
 
+            RepCounterCard(isEditable: false)
+                .padding(.horizontal, 20)
+
+            Spacer()
+
             exerciseCard
                 .padding(.horizontal, 20)
                 .dimmedWhenStimOff(serialManager.isTensEnabled)
