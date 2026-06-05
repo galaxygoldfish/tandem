@@ -82,12 +82,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var baselineSamples: [Double] = []  // Samples captured during baseline calibration
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
-    private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
-    private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
-    private var lastActiveValue: Double = 0.0
-    private let holdTime: Double = 1.0  // motor only: hold last position 1s after flex ends
-    /// EMS fades out over this window after flex ends (not a flat hold at peak).
-    private let emsReleaseDuration: Double = 0.55
+    private var latestNormalized: Double = 0.0
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
@@ -99,12 +94,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     private var emsReady = false
     private var emsLastIntensity = 0
-    private var emsSmoothedLevel = 0.0
-    private let emsRampStepUp = 1
-    private let emsRampStepDown = 2
     private let emsPulseDurationMs = 150
-    private let emsIntensitySmoothing = 0.12
-    private let emsOutputCurveExp = 1.4
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.5 }
@@ -138,9 +128,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
-        tensWindowSamples.removeAll()
         emsLastIntensity = 0
-        emsSmoothedLevel = 0.0
+        latestNormalized = 0.0
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
             self.plotData = Array(repeating: 0.0, count: 250)
@@ -227,37 +216,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         return sorted[lower] * (1.0 - weight) + sorted[upper] * weight
     }
 
-    /// Map normalized activation to output level with threshold + soft curve (EMS path).
-    private func mapToEMSOutputLevel(_ normalized: Double) -> Double {
-        guard normalized >= sensoryThreshold else { return 0.0 }
-        let safe = max(0.0, min(1.0, normalized))
-        let span = 1.0 - sensoryThreshold
-        let t = (safe - sensoryThreshold) / span
-        return pow(t, emsOutputCurveExp)
-    }
-
-    /// Map normalized strength [0, 1] to motor/TENS display level (linear above threshold).
+    /// Map normalized strength [0, 1] to output level (linear above threshold).
     private func mapToTensLevel(_ normalized: Double) -> Double {
         guard normalized >= sensoryThreshold else { return 0.0 }
         return max(0.0, min(1.0, normalized))
-    }
-
-    /// Motor holds peak briefly after flex; EMS eases out over `emsReleaseDuration`.
-    private func activationForOutput(_ avgNormalized: Double, now: Date) -> Double {
-        if avgNormalized >= sensoryThreshold {
-            lastActiveTime = now
-            lastActiveValue = avgNormalized
-            return avgNormalized
-        }
-        if useOpenEMSstim {
-            let elapsed = now.timeIntervalSince(lastActiveTime)
-            guard elapsed < emsReleaseDuration, lastActiveValue > 0 else { return 0.0 }
-            let t = elapsed / emsReleaseDuration
-            let fade = (1.0 - t) * (1.0 - t)
-            return lastActiveValue * fade
-        }
-        let inHold = now.timeIntervalSince(lastActiveTime) < holdTime
-        return inHold ? lastActiveValue : 0.0
     }
 
     /// Called by the patient Mac when receiving activation values wirelessly.
@@ -266,9 +228,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         // Abort gates remote drive too: if stimulation is off we silently drop
         // network-supplied activations so the servo stays parked at 0°.
         guard isTensEnabled else { return }
-        let now = Date()
-        let sendValue = activationForOutput(value, now: now)
-        let tensLevel = useOpenEMSstim ? mapToEMSOutputLevel(sendValue) : mapToTensLevel(sendValue)
+        let sendValue = max(0.0, min(1.0, value))
+        let tensLevel = mapToTensLevel(sendValue)
         sendStimulationOutput(activation: sendValue, displayLevel: tensLevel)
         normalizedStrength = value
         tensOutput = tensLevel
@@ -280,13 +241,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// so the next legitimate activation has to re-trigger from rest.
     func hardStop() {
         isTensEnabled = false
-        tensWindowSamples.removeAll()
-        lastActiveValue = 0.0
-        lastActiveTime = Date(timeIntervalSince1970: 0)
+        latestNormalized = 0.0
         normalizedStrength = 0.0
         tensOutput = 0.0
         emsLastIntensity = 0
-        emsSmoothedLevel = 0.0
         // Send the zero command synchronously on the port, bypassing the
         // periodic throttle in processNewValue / receiveRemoteActivation.
         if useOpenEMSstim {
@@ -304,30 +262,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    /// Build openEMSstim command from raw activation [0, 1] — mirrors test_openEMSstim.py.
+    /// Build openEMSstim command — intensity tracks normalized EMG directly.
     private func emsCommand(for activation: Double) -> String? {
-        let alpha: Double
-        if activation < emsSmoothedLevel {
-            alpha = min(1.0, emsIntensitySmoothing * 2.8)
-        } else {
-            alpha = emsIntensitySmoothing
-        }
-        emsSmoothedLevel += (activation - emsSmoothedLevel) * alpha
-
-        if emsSmoothedLevel < 0.001 && emsLastIntensity == 0 { return nil }
-
-        let curved = mapToEMSOutputLevel(emsSmoothedLevel)
+        let level = mapToTensLevel(activation)
         let ceiling = min(maxServoDegrees, 100)
-        let raw = Int(curved * Double(ceiling) + 0.5)
-        let target = max(0, min(raw, ceiling))
-        let ramped: Int
-        if target > emsLastIntensity {
-            ramped = min(target, emsLastIntensity + emsRampStepUp)
-        } else {
-            ramped = max(target, emsLastIntensity - emsRampStepDown)
-        }
-        emsLastIntensity = ramped
-        return "C0I\(ramped)T\(emsPulseDurationMs)G"
+        let intensity = max(0, min(Int(level * Double(ceiling) + 0.5), ceiling))
+        if intensity == 0 && emsLastIntensity == 0 { return nil }
+        emsLastIntensity = intensity
+        return "C0I\(intensity)T\(emsPulseDurationMs)G"
     }
 
     /// Route normalized activation to motor or openEMSstim output.
@@ -495,29 +437,19 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let amplified = envelope * (gainMultiplier * 20)
         smoothedValue = (amplified * signalSmoothing) + (smoothedValue * (1 - signalSmoothing))
         
-        // Compute normalized strength [0, 1] and map to TENS level.
         let normalized = computeNormalizedStrength(envelope)
-        let tensLevel = useOpenEMSstim
-            ? mapToEMSOutputLevel(mapToTensLevel(normalized))
-            : mapToTensLevel(normalized)
+        latestNormalized = normalized
+        let tensLevel = mapToTensLevel(normalized)
 
         if isRecording, let start = recordingStartTime {
             let ms = Int64(Date().timeIntervalSince(start) * 1000)
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        // Accumulate normalized values and send averaged command every 500ms.
-        tensWindowSamples.append(normalized)
         if isTensEnabled, Date().timeIntervalSince(lastTensSent) > sendInterval {
             lastTensSent = Date()
-            let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
-            tensWindowSamples.removeAll()
-            let sendValue = activationForOutput(avgNormalized, now: Date())
-            let displayLevel = useOpenEMSstim
-                ? mapToEMSOutputLevel(mapToTensLevel(sendValue))
-                : mapToTensLevel(sendValue)
-            sendStimulationOutput(activation: sendValue, displayLevel: displayLevel)
-            networkManager?.sendActivation(avgNormalized)
+            sendStimulationOutput(activation: latestNormalized, displayLevel: tensLevel)
+            networkManager?.sendActivation(latestNormalized)
         }
 
         // Update UI with latest values.
