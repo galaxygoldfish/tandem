@@ -74,6 +74,7 @@ struct DevelopmentView: View {
         }
         .navigationTitle("Tandem")
         .navigationSubtitle(connectionSubtitle)
+        .onAppear { serialManager.calibrationCompleted = true }
     }
 
     private var connectionSubtitle: Text {

@@ -35,7 +35,13 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var recordingTime: String = "00:00"
     @Published var isConsolePoppedOut: Bool = false
     /// Set by the therapist when calibration is complete — patient observes this to advance.
-    @Published var calibrationCompleted: Bool = false
+    @Published var calibrationCompleted: Bool = false {
+        didSet {
+            if calibrationCompleted {
+                stimulationAllowedAfter = Date().addingTimeInterval(postCalibrationDelay)
+            }
+        }
+    }
     
     // MARK: - EMG Processing & Calibration (NEW)
     /// Live normalized strength from EMG (0 = rest, 1 = max contraction).
@@ -83,6 +89,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
     private var latestNormalized: Double = 0.0
+    private let postCalibrationDelay: TimeInterval = 2.0
+    private var stimulationAllowedAfter: Date = .distantFuture
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
@@ -138,11 +146,20 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
+    /// No TENS until calibration UI is finished and session has started.
+    private var tensOutputAllowed: Bool {
+        calibrationMode == .none
+            && calibrationCompleted
+            && Date() >= stimulationAllowedAfter
+    }
+
     /// Start or stop baseline calibration. During baseline, quiet EMG samples are collected for 3-5 seconds.
     func toggleBaselineCalibration() {
         if calibrationMode == .baseline {
             stopCalibration()
         } else {
+            calibrationCompleted = false
+            parkTensOutput()
             calibrationMode = .baseline
             baselineSamples.removeAll()
             DispatchQueue.main.async {
@@ -156,6 +173,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         if calibrationMode == .mvc {
             stopCalibration()
         } else {
+            calibrationCompleted = false
+            parkTensOutput()
             calibrationMode = .mvc
             mvcSamples.removeAll()
             DispatchQueue.main.async {
@@ -227,7 +246,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     func receiveRemoteActivation(_ value: Double) {
         // Abort gates remote drive too: if stimulation is off we silently drop
         // network-supplied activations so the servo stays parked at 0°.
-        guard isTensEnabled else { return }
+        guard isTensEnabled, tensOutputAllowed else { return }
         let sendValue = max(0.0, min(1.0, value))
         let tensLevel = mapToTensLevel(sendValue)
         sendStimulationOutput(activation: sendValue, displayLevel: tensLevel)
@@ -272,9 +291,21 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         return "C0I\(intensity)T\(emsPulseDurationMs)G"
     }
 
+    /// Send zero / park output when entering calibration.
+    private func parkTensOutput() {
+        latestNormalized = 0.0
+        emsLastIntensity = 0
+        guard isTensConnected else { return }
+        if useOpenEMSstim, emsReady, let data = "C0I0T\(emsPulseDurationMs)G".data(using: .utf8) {
+            tensPort?.send(data)
+        } else if !useOpenEMSstim, let data = "0\n".data(using: .utf8) {
+            tensPort?.send(data)
+        }
+    }
+
     /// Route normalized activation to motor or openEMSstim output.
     private func sendStimulationOutput(activation: Double, displayLevel: Double) {
-        guard isTensConnected, calibrationMode == .none else { return }
+        guard isTensConnected, tensOutputAllowed else { return }
         if useOpenEMSstim {
             guard emsReady else { return }
             let pct = Int((activation * 100).rounded())
@@ -446,7 +477,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        if isTensEnabled, calibrationMode == .none, Date().timeIntervalSince(lastTensSent) > sendInterval {
+        if isTensEnabled, tensOutputAllowed, Date().timeIntervalSince(lastTensSent) > sendInterval {
             lastTensSent = Date()
             sendStimulationOutput(activation: latestNormalized, displayLevel: tensLevel)
             networkManager?.sendActivation(latestNormalized)
