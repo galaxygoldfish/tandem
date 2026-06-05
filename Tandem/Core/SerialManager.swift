@@ -274,7 +274,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     /// Route normalized activation to motor or openEMSstim output.
     private func sendStimulationOutput(activation: Double, displayLevel: Double) {
-        guard isTensConnected else { return }
+        guard isTensConnected, calibrationMode == .none else { return }
         if useOpenEMSstim {
             guard emsReady else { return }
             let pct = Int((activation * 100).rounded())
@@ -446,7 +446,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > sendInterval {
+        if isTensEnabled, calibrationMode == .none, Date().timeIntervalSince(lastTensSent) > sendInterval {
             lastTensSent = Date()
             sendStimulationOutput(activation: latestNormalized, displayLevel: tensLevel)
             networkManager?.sendActivation(latestNormalized)
