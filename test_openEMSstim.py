@@ -32,12 +32,13 @@ EMG_BAUD = 115200
 EMS_BOOT_WAIT_S = 10
 SENSORY_THRESHOLD = 0.15
 RAMP_STEP_UP = 1
-RAMP_STEP_DOWN = 3
+RAMP_STEP_DOWN = 2
 INTENSITY_SMOOTHING = 0.12  # EMA on activation 0–1 (lower = smoother)
 OUTPUT_CURVE_EXP = 1.4      # >1 = slower approach to ceiling, like easing a dial
 PULSE_DURATION_MS = 150
 SEND_INTERVAL_S = 0.1
 HOLD_TIME_S = 1.0
+EMS_RELEASE_S = 0.55        # fade to zero after flex (not a flat hold at peak)
 TO_MILLIVOLTS = 0.00815
 ENVELOPE_WINDOW = 20
 BASELINE_ALPHA = 0.0001
@@ -75,7 +76,7 @@ class EMSOutput:
 
     def command_for_level(self, level: float) -> str | None:
         # Follow releases faster than rises (dial back down quicker than up).
-        alpha = self.smoothing * 4.0 if level < self.smoothed_level else self.smoothing
+        alpha = self.smoothing * 2.8 if level < self.smoothed_level else self.smoothing
         alpha = min(1.0, alpha)
         self.smoothed_level += (level - self.smoothed_level) * alpha
 
@@ -109,15 +110,20 @@ class EMSOutput:
 def send_value_with_hold(avg: float, last_active_time: float,
                          last_active_value: float, now: float,
                          use_hold: bool = True) -> tuple[float, float, float, float]:
-    """Hold logic for EMG mode; simulate mode passes use_hold=False so release goes to 0."""
-    if use_hold and avg >= SENSORY_THRESHOLD:
+    """Motor hold at peak; EMS eases out over EMS_RELEASE_S."""
+    if avg >= SENSORY_THRESHOLD:
         last_active_time = now
         last_active_value = avg
-    if use_hold:
-        in_hold = (now - last_active_time) < HOLD_TIME_S
-        send_value = avg if avg >= SENSORY_THRESHOLD else (last_active_value if in_hold else 0.0)
-    else:
-        send_value = avg
+        return avg, last_active_time, last_active_value, avg
+    if not use_hold:
+        elapsed = now - last_active_time
+        if elapsed >= EMS_RELEASE_S or last_active_value <= 0:
+            return 0.0, last_active_time, last_active_value, 0.0
+        t = elapsed / EMS_RELEASE_S
+        activation = last_active_value * (1.0 - t) ** 2
+        return activation, last_active_time, last_active_value, activation
+    in_hold = (now - last_active_time) < HOLD_TIME_S
+    send_value = last_active_value if in_hold else 0.0
     return send_value, last_active_time, last_active_value, send_value
 
 
@@ -364,7 +370,7 @@ def main():
     parser.add_argument("--cycle", type=float, default=8.0,
                         help="Simulated flex cycle length in seconds (default 8)")
     parser.add_argument("--ramp-step", type=int, default=RAMP_STEP_UP,
-                        help="Max intensity increase per tick (default 1; down uses 3)")
+                        help="Max intensity increase per tick (default 1; down uses 2)")
     parser.add_argument("--smoothing", type=float, default=INTENSITY_SMOOTHING,
                         help="Activation EMA 0–1 (lower = smoother, default 0.12)")
     args = parser.parse_args()
