@@ -86,9 +86,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
     private var lastActiveValue: Double = 0.0
     private let holdTime: Double = 1.0  // motor only: hold last position 1s after flex ends
-    
-    /// EMS skips post-flex hold; motor keeps `holdTime`.
-    private var effectiveHoldTime: TimeInterval { useOpenEMSstim ? 0 : holdTime }
+    /// EMS fades out over this window after flex ends (not a flat hold at peak).
+    private let emsReleaseDuration: Double = 0.55
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
@@ -114,7 +113,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var emsLastIntensity = 0
     private var emsSmoothedLevel = 0.0
     private let emsRampStepUp = 1
-    private let emsRampStepDown = 3
+    private let emsRampStepDown = 2
     private let emsPulseDurationMs = 150
     private let emsIntensitySmoothing = 0.12
     private let emsOutputCurveExp = 1.4
@@ -285,14 +284,22 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         networkManager?.sendRepCount(0)
     }
 
-    /// Apply hold logic; EMS uses no hold so stimulation stops when flex ends.
+    /// Motor holds peak briefly after flex; EMS eases out over `emsReleaseDuration`.
     private func activationForOutput(_ avgNormalized: Double, now: Date) -> Double {
         if avgNormalized >= sensoryThreshold {
             lastActiveTime = now
             lastActiveValue = avgNormalized
+            return avgNormalized
         }
-        let inHold = now.timeIntervalSince(lastActiveTime) < effectiveHoldTime
-        return avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
+        if useOpenEMSstim {
+            let elapsed = now.timeIntervalSince(lastActiveTime)
+            guard elapsed < emsReleaseDuration, lastActiveValue > 0 else { return 0.0 }
+            let t = elapsed / emsReleaseDuration
+            let fade = (1.0 - t) * (1.0 - t)
+            return lastActiveValue * fade
+        }
+        let inHold = now.timeIntervalSince(lastActiveTime) < holdTime
+        return inHold ? lastActiveValue : 0.0
     }
 
     /// Called by the patient Mac when receiving activation values wirelessly.
@@ -343,7 +350,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private func emsCommand(for activation: Double) -> String? {
         let alpha: Double
         if activation < emsSmoothedLevel {
-            alpha = min(1.0, emsIntensitySmoothing * 4.0)
+            alpha = min(1.0, emsIntensitySmoothing * 2.8)
         } else {
             alpha = emsIntensitySmoothing
         }
