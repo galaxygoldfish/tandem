@@ -150,6 +150,7 @@ struct TelehealthPatientView: View {
             serialManager.receiveRemoteActivation(value)
         }
         networkManager.onCalibrationReceived = {
+            serialManager.calibrationCompleted = true
             withAnimation(.onboardingSpring) {
                 step = .session
             }

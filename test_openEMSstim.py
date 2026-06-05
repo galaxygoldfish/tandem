@@ -31,14 +31,8 @@ EMS_BAUD = 19200
 EMG_BAUD = 115200
 EMS_BOOT_WAIT_S = 10
 SENSORY_THRESHOLD = 0.15
-RAMP_STEP_UP = 1
-RAMP_STEP_DOWN = 2
-INTENSITY_SMOOTHING = 0.12  # EMA on activation 0–1 (lower = smoother)
-OUTPUT_CURVE_EXP = 1.4      # >1 = slower approach to ceiling, like easing a dial
 PULSE_DURATION_MS = 150
 SEND_INTERVAL_S = 0.1
-HOLD_TIME_S = 1.0
-EMS_RELEASE_S = 0.55        # fade to zero after flex (not a flat hold at peak)
 TO_MILLIVOLTS = 0.00815
 ENVELOPE_WINDOW = 20
 BASELINE_ALPHA = 0.0001
@@ -47,14 +41,10 @@ BASELINE_WARMUP_SAMPLES = 500
 
 
 def map_to_tens_level(normalized: float) -> float:
-    """Map activation to output level with threshold + soft curve (gentle ramp to max)."""
+    """Linear output above threshold — tracks EMG symmetrically."""
     if normalized < SENSORY_THRESHOLD:
         return 0.0
-    safe = max(0.0, min(1.0, normalized))
-    # Re-scale [threshold, 1] → [0, 1], then curve so max isn't reached suddenly.
-    span = 1.0 - SENSORY_THRESHOLD
-    t = (safe - SENSORY_THRESHOLD) / span
-    return t ** OUTPUT_CURVE_EXP
+    return max(0.0, min(1.0, normalized))
 
 
 def _smoothstep(x: float) -> float:
@@ -63,40 +53,22 @@ def _smoothstep(x: float) -> float:
 
 
 class EMSOutput:
-    """Maps smoothed activation → ramped EMS intensity commands."""
+    """Maps activation directly to EMS intensity (no extra smoothing or hold)."""
 
-    def __init__(self, ceiling: int, ramp_step_up: int = RAMP_STEP_UP,
-                 ramp_step_down: int = RAMP_STEP_DOWN, smoothing: float = INTENSITY_SMOOTHING):
+    def __init__(self, ceiling: int):
         self.ceiling = min(ceiling, 100)
-        self.ramp_step_up = max(1, ramp_step_up)
-        self.ramp_step_down = max(1, ramp_step_down)
-        self.smoothing = max(0.01, min(1.0, smoothing))
         self.last_intensity = 0
-        self.smoothed_level = 0.0
 
     def command_for_level(self, level: float) -> str | None:
-        # Follow releases faster than rises (dial back down quicker than up).
-        alpha = self.smoothing * 2.8 if level < self.smoothed_level else self.smoothing
-        alpha = min(1.0, alpha)
-        self.smoothed_level += (level - self.smoothed_level) * alpha
-
-        if self.smoothed_level < 0.001 and self.last_intensity == 0:
+        mapped = map_to_tens_level(level)
+        intensity = max(0, min(int(mapped * self.ceiling + 0.5), self.ceiling))
+        if intensity == 0 and self.last_intensity == 0:
             return None
-
-        curved = map_to_tens_level(self.smoothed_level)
-        raw = int(curved * self.ceiling + 0.5)
-        target = max(0, min(raw, self.ceiling))
-        if target > self.last_intensity:
-            ramped = min(target, self.last_intensity + self.ramp_step_up)
-        else:
-            ramped = max(target, self.last_intensity - self.ramp_step_down)
-        self.last_intensity = ramped
-        # Always send explicit I0 while ramping down so the channel fully closes.
-        return f"C0I{ramped}T{PULSE_DURATION_MS}G"
+        self.last_intensity = intensity
+        return f"C0I{intensity}T{PULSE_DURATION_MS}G"
 
     def zero_command(self) -> str:
         self.last_intensity = 0
-        self.smoothed_level = 0.0
         return f"C0I0T{PULSE_DURATION_MS}G"
 
     def abort(self, port: serial.Serial | None, dry_run: bool) -> None:
@@ -107,24 +79,9 @@ class EMSOutput:
                 port.write(zero.encode("utf-8"))
 
 
-def send_value_with_hold(avg: float, last_active_time: float,
-                         last_active_value: float, now: float,
-                         use_hold: bool = True) -> tuple[float, float, float, float]:
-    """Motor hold at peak; EMS eases out over EMS_RELEASE_S."""
-    if avg >= SENSORY_THRESHOLD:
-        last_active_time = now
-        last_active_value = avg
-        return avg, last_active_time, last_active_value, avg
-    if not use_hold:
-        elapsed = now - last_active_time
-        if elapsed >= EMS_RELEASE_S or last_active_value <= 0:
-            return 0.0, last_active_time, last_active_value, 0.0
-        t = elapsed / EMS_RELEASE_S
-        activation = last_active_value * (1.0 - t) ** 2
-        return activation, last_active_time, last_active_value, activation
-    in_hold = (now - last_active_time) < HOLD_TIME_S
-    send_value = last_active_value if in_hold else 0.0
-    return send_value, last_active_time, last_active_value, send_value
+def activation_for_output(level: float) -> float:
+    """Pass through normalized EMG — no hold or release fade."""
+    return max(0.0, min(1.0, level))
 
 
 def simulated_activation(elapsed_s: float, cycle_s: float = 8.0) -> float:
@@ -198,14 +155,6 @@ class EMGProcessor:
 
 
 def ramp_to_zero(ems: EMSOutput, port: serial.Serial | None, dry_run: bool) -> None:
-    """Step intensity down to 0 before abort (dial back to off)."""
-    while ems.last_intensity > 0:
-        cmd = f"C0I{max(0, ems.last_intensity - ems.ramp_step)}T{PULSE_DURATION_MS}G"
-        ems.last_intensity = max(0, ems.last_intensity - ems.ramp_step)
-        print(f"RAMP DOWN → {cmd}")
-        if port and not dry_run:
-            port.write(cmd.encode("utf-8"))
-        time.sleep(SEND_INTERVAL_S)
     zero = ems.zero_command()
     print(f"OFF → {zero}")
     if port and not dry_run:
@@ -219,12 +168,8 @@ def run_output_loop(
     port: serial.Serial | None,
     dry_run: bool,
     duration_s: float | None,
-    use_hold: bool = False,
 ) -> None:
     last_sent = 0.0
-    last_active_time = 0.0
-    last_active_value = 0.0
-    window_samples: list[float] = []
     start = time.time()
 
     print(f"\nOutput loop — send every {SEND_INTERVAL_S}s, ceiling={ems.ceiling}, dry_run={dry_run}")
@@ -236,24 +181,18 @@ def run_output_loop(
                 break
 
             normalized = get_normalized()
-            window_samples.append(normalized)
             now = time.time()
             if now - last_sent < SEND_INTERVAL_S:
                 time.sleep(0.001)
                 continue
             last_sent = now
 
-            avg = sum(window_samples) / len(window_samples) if window_samples else 0.0
-            window_samples.clear()
-
-            send_value, last_active_time, last_active_value, activation = send_value_with_hold(
-                avg, last_active_time, last_active_value, now, use_hold=use_hold
-            )
+            activation = activation_for_output(normalized)
             cmd = ems.command_for_level(activation)
             if cmd:
-                label = f"activation={avg:.0%}  I={ems.last_intensity}  → {cmd}"
+                label = f"activation={normalized:.0%}  I={ems.last_intensity}  → {cmd}"
             else:
-                label = f"activation={avg:.0%}  → off"
+                label = f"activation={normalized:.0%}  → off"
             print(label)
             if cmd and port and not dry_run:
                 port.write(cmd.encode("utf-8"))
@@ -266,13 +205,13 @@ def run_output_loop(
 
 
 def run_simulate(args, port):
-    ems = EMSOutput(args.ceiling, ramp_step_up=args.ramp_step, smoothing=args.smoothing)
+    ems = EMSOutput(args.ceiling)
     start = time.time()
 
     def get_norm():
         return simulated_activation(time.time() - start, args.cycle)
 
-    run_output_loop(get_norm, ems, port, args.dry_run, args.duration, use_hold=False)
+    run_output_loop(get_norm, ems, port, args.dry_run, args.duration)
 
 
 def run_emg(args, port):
@@ -280,7 +219,7 @@ def run_emg(args, port):
     emg_port = serial.Serial(args.emg, EMG_BAUD, timeout=1)
     time.sleep(2)
     processor = EMGProcessor()
-    ems = EMSOutput(args.ceiling, ramp_step_up=args.ramp_step, smoothing=args.smoothing)
+    ems = EMSOutput(args.ceiling)
     data_buffer = ""
 
     def input_listener():
@@ -304,9 +243,6 @@ def run_emg(args, port):
     print("Calibrate: b = baseline, m = MVC, q = quit\n")
 
     last_sent = 0.0
-    last_active_time = 0.0
-    last_active_value = 0.0
-    window_samples: list[float] = []
 
     try:
         while True:
@@ -328,23 +264,18 @@ def run_emg(args, port):
                 if not processor.is_calibrated():
                     print(f"  EMG: {envelope:.4f} mV  (calibrate: b then m)", end="\r")
                     continue
-                window_samples.append(normalized)
                 now = time.time()
                 if now - last_sent < SEND_INTERVAL_S:
                     continue
                 last_sent = now
-                avg = sum(window_samples) / len(window_samples)
-                window_samples.clear()
-                _, last_active_time, last_active_value, activation = send_value_with_hold(
-                    avg, last_active_time, last_active_value, now, use_hold=False
-                )
+                activation = activation_for_output(normalized)
                 cmd = ems.command_for_level(activation)
                 if cmd:
-                    print(f"  EMG: {envelope:.4f} mV  act={avg:.0%}  → {cmd}          ")
+                    print(f"  EMG: {envelope:.4f} mV  act={normalized:.0%}  → {cmd}          ")
                     if port and not args.dry_run:
                         port.write(cmd.encode("utf-8"))
                 else:
-                    print(f"  EMG: {envelope:.4f} mV  act={avg:.0%}                  ", end="\r")
+                    print(f"  EMG: {envelope:.4f} mV  act={normalized:.0%}                  ", end="\r")
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
@@ -369,17 +300,10 @@ def main():
                         help="Simulate mode run length in seconds (default 8)")
     parser.add_argument("--cycle", type=float, default=8.0,
                         help="Simulated flex cycle length in seconds (default 8)")
-    parser.add_argument("--ramp-step", type=int, default=RAMP_STEP_UP,
-                        help="Max intensity increase per tick (default 1; down uses 2)")
-    parser.add_argument("--smoothing", type=float, default=INTENSITY_SMOOTHING,
-                        help="Activation EMA 0–1 (lower = smoother, default 0.12)")
     args = parser.parse_args()
 
     if args.ceiling < 0 or args.ceiling > 100:
         print("Error: --ceiling must be 0–100")
-        sys.exit(1)
-    if args.ramp_step < 1:
-        print("Error: --ramp-step must be >= 1")
         sys.exit(1)
 
     use_hardware = bool(args.ems) and not args.dry_run
