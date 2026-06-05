@@ -35,7 +35,13 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var recordingTime: String = "00:00"
     @Published var isConsolePoppedOut: Bool = false
     /// Set by the therapist when calibration is complete — patient observes this to advance.
-    @Published var calibrationCompleted: Bool = false
+    @Published var calibrationCompleted: Bool = false {
+        didSet {
+            if calibrationCompleted {
+                stimulationAllowedAfter = Date().addingTimeInterval(postCalibrationDelay)
+            }
+        }
+    }
     
     // MARK: - EMG Processing & Calibration (NEW)
     /// Live normalized strength from EMG (0 = rest, 1 = max contraction).
@@ -82,15 +88,24 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var baselineSamples: [Double] = []  // Samples captured during baseline calibration
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []  // Short buffer for envelope smoothing (~20 samples)
-    private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
-    private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
-    private var lastActiveValue: Double = 0.0
-    private let holdTime: Double = 1.0  // hold last position for 1s after flex ends
+    private var latestNormalized: Double = 0.0
+    private let postCalibrationDelay: TimeInterval = 2.0
+    private var stimulationAllowedAfter: Date = .distantFuture
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
+    /// When `useOpenEMSstim` is true, this value is capped at 100 and used as the EMS intensity ceiling.
     @Published var maxServoDegrees: Int = 100
 
+    /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
+    var useOpenEMSstim = false
+
+    private var emsReady = false
+    private var emsLastIntensity = 0
+    private let emsPulseDurationMs = 150
+    private let sensoryThreshold = 0.3
+
+    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.5 }
     // MARK: - Rep Counter
     @Published var repCount: Int = 0
     @Published var targetReps: Int = 10 {
@@ -131,7 +146,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
-        tensWindowSamples.removeAll()
+        emsLastIntensity = 0
+        latestNormalized = 0.0
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
             self.plotData = Array(repeating: 0.0, count: 250)
@@ -140,11 +156,20 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
+    /// No TENS until calibration UI is finished and session has started.
+    private var tensOutputAllowed: Bool {
+        calibrationMode == .none
+            && calibrationCompleted
+            && Date() >= stimulationAllowedAfter
+    }
+
     /// Start or stop baseline calibration. During baseline, quiet EMG samples are collected for 3-5 seconds.
     func toggleBaselineCalibration() {
         if calibrationMode == .baseline {
             stopCalibration()
         } else {
+            calibrationCompleted = false
+            parkTensOutput()
             calibrationMode = .baseline
             baselineSamples.removeAll()
             DispatchQueue.main.async {
@@ -158,6 +183,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         if calibrationMode == .mvc {
             stopCalibration()
         } else {
+            calibrationCompleted = false
+            parkTensOutput()
             calibrationMode = .mvc
             mvcSamples.removeAll()
             DispatchQueue.main.async {
@@ -218,14 +245,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         return sorted[lower] * (1.0 - weight) + sorted[upper] * weight
     }
 
-    /// Map normalized strength [0, 1] to TENS output [0, 1] using a nonlinear curve.
-    /// Exponent 1.8 means: gentle response at low levels, steep ramp at high levels.
-    /// This prevents small arm movements from causing sudden large stimulation jumps.
+    /// Map normalized strength [0, 1] to output level (linear above threshold).
     private func mapToTensLevel(_ normalized: Double) -> Double {
-        let sensoryThreshold = 0.15  // Below this, output is zero — prevents rest noise from triggering stim
         guard normalized >= sensoryThreshold else { return 0.0 }
-        let safeNormalized = max(0.0, min(1.0, normalized))
-        return safeNormalized
+        return max(0.0, min(1.0, normalized))
     }
 
     // MARK: - Rep Counting
@@ -263,17 +286,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     func receiveRemoteActivation(_ value: Double) {
         // Abort gates remote drive too: if stimulation is off we silently drop
         // network-supplied activations so the servo stays parked at 0°.
-        guard isTensEnabled else { return }
-        let sensoryThreshold = 0.15
-        let now = Date()
-        if value >= sensoryThreshold {
-            lastActiveTime = now
-            lastActiveValue = value
-        }
-        let inHold = now.timeIntervalSince(lastActiveTime) < holdTime
-        let sendValue = value >= sensoryThreshold ? value : (inHold ? lastActiveValue : 0.0)
+        guard isTensEnabled, tensOutputAllowed else { return }
+        let sendValue = max(0.0, min(1.0, value))
         let tensLevel = mapToTensLevel(sendValue)
-        sendTensCommand(tensLevel)
+        sendStimulationOutput(activation: sendValue, displayLevel: tensLevel)
         normalizedStrength = value
         tensOutput = tensLevel
     }
@@ -284,41 +300,79 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// so the next legitimate activation has to re-trigger from rest.
     func hardStop() {
         isTensEnabled = false
-        tensWindowSamples.removeAll()
-        lastActiveValue = 0.0
-        lastActiveTime = Date(timeIntervalSince1970: 0)
+        latestNormalized = 0.0
         normalizedStrength = 0.0
         tensOutput = 0.0
+        emsLastIntensity = 0
         // Send the zero command synchronously on the port, bypassing the
         // periodic throttle in processNewValue / receiveRemoteActivation.
-        let zero = "0\n".data(using: .utf8) ?? Data()
-        for _ in 0..<3 {
-            tensPort?.send(zero)
+        if useOpenEMSstim {
+            let zero = "C0I0T\(emsPulseDurationMs)G"
+            if let data = zero.data(using: .utf8) {
+                for _ in 0..<3 { tensPort?.send(data) }
+            }
+        } else {
+            let zero = "0\n".data(using: .utf8) ?? Data()
+            for _ in 0..<3 { tensPort?.send(zero) }
         }
         DispatchQueue.main.async {
-            self.logs.append(LogEntry(text: "ABORT — servo parked at 0°"))
+            let msg = self.useOpenEMSstim ? "ABORT — EMS stopped" : "ABORT — servo parked at 0°"
+            self.logStim(msg)
         }
     }
 
-    /// Send TENS command to the device. Currently logs the command; integrate actual TENS hardware here.
-    /// 
-    /// TODO: Replace this with actual device communication:
-    /// - Option 1: Second serial port (ORSSerialPort) to TENS hardware
-    /// - Option 2: OpenEMSstim API call
-    /// - Option 3: BLE/Bluetooth command
-    /// 
-    /// Example format (device-dependent):
-    ///   - "AMPLITUDE:0.75\n" for normalized level
-    ///   - "LEVEL:75" for 0-100 scale
-    ///   - etc.
-    private func sendTensCommand(_ level: Double) {
-        let degrees = Int(level * Double(maxServoDegrees))
-        let command = "\(degrees)\n"
-        DispatchQueue.main.async {
-            self.logs.append(LogEntry(text: "SEND → \(degrees) degrees"))
-        }
-        if let data = command.data(using: .utf8) {
+    /// Build openEMSstim command — intensity tracks normalized EMG directly.
+    private func emsCommand(for activation: Double) -> String? {
+        let level = mapToTensLevel(activation)
+        let ceiling = min(maxServoDegrees, 100)
+        let intensity = max(0, min(Int(level * Double(ceiling) + 0.5), ceiling))
+        if intensity == 0 && emsLastIntensity == 0 { return nil }
+        emsLastIntensity = intensity
+        return "C0I\(intensity)T\(emsPulseDurationMs)G"
+    }
+
+    /// Send zero / park output when entering calibration.
+    private func parkTensOutput() {
+        latestNormalized = 0.0
+        emsLastIntensity = 0
+        guard isTensConnected else { return }
+        if useOpenEMSstim, emsReady, let data = "C0I0T\(emsPulseDurationMs)G".data(using: .utf8) {
             tensPort?.send(data)
+        } else if !useOpenEMSstim, let data = "0\n".data(using: .utf8) {
+            tensPort?.send(data)
+        }
+    }
+
+    /// Route normalized activation to motor or openEMSstim output.
+    private func sendStimulationOutput(activation: Double, displayLevel: Double) {
+        guard isTensConnected, tensOutputAllowed else { return }
+        if useOpenEMSstim {
+            guard emsReady else { return }
+            let pct = Int((activation * 100).rounded())
+            let command = emsCommand(for: activation)
+            if let command, let data = command.data(using: .utf8) {
+                logStim("activation=\(pct)%  I=\(emsLastIntensity)  → \(command)")
+                tensPort?.send(data)
+            } else {
+                logStim("activation=\(pct)%  → off")
+            }
+        } else {
+            let degrees = Int(displayLevel * Double(maxServoDegrees))
+            let command = "\(degrees)\n"
+            logStim("activation=\(Int((activation * 100).rounded()))%  → \(degrees)°")
+            if let data = command.data(using: .utf8) {
+                tensPort?.send(data)
+            }
+        }
+    }
+
+    /// Console + in-app log line for stimulation debugging (also prints to Xcode console).
+    private func logStim(_ text: String) {
+        Logger.serial.info("\(text)")
+        print("[STIM] \(text)")
+        DispatchQueue.main.async {
+            self.logs.append(LogEntry(text: text))
+            if self.logs.count > 500 { self.logs.removeFirst() }
         }
     }
 
@@ -338,21 +392,38 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let allPaths = availablePorts.map(\.path).joined(separator: ", ")
         Logger.serial.info("Available serial ports: \(allPaths)")
 
-        let candidates = availablePorts.filter { port in
+        for port in availablePorts {
             let path = port.path.lowercased()
-            // Accept any USB-attached serial port. Excludes Bluetooth-Incoming-Port etc.
-            return path.contains("usb")
-        }
+            guard portRoles[port.path] == nil else { continue }
 
-        // Open any candidate we don't already know.
-        for port in candidates where portRoles[port.path] == nil && pendingBuffers[port.path] == nil {
-            port.baudRate = 115200
-            port.delegate = self
-            pendingBuffers[port.path] = Data()
-            port.open()
-            Logger.serial.info("Opening port for identification: \(port.path)")
-            DispatchQueue.main.async {
-                self.logs.append(LogEntry(text: "OPENING: \(port.path)"))
+            if useOpenEMSstim, path.contains("usbserial") || path.contains("wchusbserial") {
+                port.baudRate = 19200
+                port.delegate = self
+                port.open()
+                portRoles[path] = .tens
+                tensPort = port
+                emsReady = false
+                isTensConnected = false
+                Logger.serial.info("Opening openEMSstim port: \(port.path)")
+                DispatchQueue.main.async {
+                    self.logs.append(LogEntry(text: "OPENING EMS: \(port.path) (10s init)"))
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                    guard let self, self.tensPort?.path == port.path else { return }
+                    self.emsReady = true
+                    self.isTensConnected = true
+                    let ceiling = min(self.maxServoDegrees, 100)
+                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(ceiling), interval=\(self.sendInterval)s)")
+                }
+            } else if path.contains("usb"), pendingBuffers[port.path] == nil {
+                port.baudRate = 115200
+                port.delegate = self
+                pendingBuffers[port.path] = Data()
+                port.open()
+                Logger.serial.info("Opening port for identification: \(port.path)")
+                DispatchQueue.main.async {
+                    self.logs.append(LogEntry(text: "OPENING: \(port.path)"))
+                }
             }
         }
     }
@@ -437,8 +508,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let amplified = envelope * (gainMultiplier * 20)
         smoothedValue = (amplified * signalSmoothing) + (smoothedValue * (1 - signalSmoothing))
         
-        // Compute normalized strength [0, 1] and map to TENS level.
         let normalized = computeNormalizedStrength(envelope)
+        latestNormalized = normalized
         let tensLevel = mapToTensLevel(normalized)
 
         if isRecording, let start = recordingStartTime {
@@ -446,10 +517,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        // Accumulate normalized values and send averaged command every 500ms.
-        tensWindowSamples.append(normalized)
-        if isTensEnabled, Date().timeIntervalSince(lastTensSent) > 0.5 {
+        if isTensEnabled, tensOutputAllowed, Date().timeIntervalSince(lastTensSent) > sendInterval {
             lastTensSent = Date()
+            sendStimulationOutput(activation: latestNormalized, displayLevel: tensLevel)
+            networkManager?.sendActivation(latestNormalized)
             let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
             tensWindowSamples.removeAll()
             let sensoryThreshold = 0.15
@@ -546,7 +617,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
         if text.contains("SYSTEM_START_EMG") {
             assignEMG(port, leftoverBuffer: dropEverythingThrough("SYSTEM_START_EMG", in: text))
-        } else if text.contains("SYSTEM_START_TENS") {
+        } else if !useOpenEMSstim, text.contains("SYSTEM_START_TENS") {
             portRoles[port.path] = .tens
             pendingBuffers.removeValue(forKey: port.path)
             DispatchQueue.main.async {
@@ -574,17 +645,19 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         DispatchQueue.main.async {
             self.serialPort = port
             self.isConnected = true
-            self.logs.append(LogEntry(text: "EMG CONNECTED: \(port.path)"))
+            self.logStim("EMG CONNECTED: \(port.path)")
         }
         // The TENS arduino prints SYSTEM_START_TENS once and then nothing. If we missed
         // that line (e.g., the board didn't auto-reset on port open), it would stay pending
         // forever. Once EMG is identified, treat any other still-pending usbmodem port as TENS.
+        guard !useOpenEMSstim else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             self?.promotePendingPortsToTens()
         }
     }
 
     private func promotePendingPortsToTens() {
+        guard !useOpenEMSstim else { return }
         let stillPending = pendingBuffers.keys
         guard !stillPending.isEmpty else { return }
         let knownPorts = ORSSerialPortManager.shared().availablePorts
@@ -651,6 +724,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             case .tens:
                 self.isTensConnected = false
                 self.tensPort = nil
+                self.emsReady = false
                 self.logs.append(LogEntry(text: "TENS DISCONNECTED: \(port.path)"))
             case .none:
                 self.logs.append(LogEntry(text: "PORT REMOVED (unidentified): \(port.path)"))
