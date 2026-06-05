@@ -85,7 +85,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var tensWindowSamples: [Double] = []  // Normalized values accumulated over 500ms window
     private var lastActiveTime: Date = Date(timeIntervalSince1970: 0)
     private var lastActiveValue: Double = 0.0
-    private let holdTime: Double = 1.0  // hold last position for 1s after flex ends
+    private let holdTime: Double = 1.0  // motor only: hold last position 1s after flex ends
+    
+    /// EMS skips post-flex hold; motor keeps `holdTime`.
+    private var effectiveHoldTime: TimeInterval { useOpenEMSstim ? 0 : holdTime }
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
@@ -110,7 +113,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var emsReady = false
     private var emsLastIntensity = 0
     private var emsSmoothedLevel = 0.0
-    private let emsRampStep = 1
+    private let emsRampStepUp = 1
+    private let emsRampStepDown = 3
     private let emsPulseDurationMs = 150
     private let emsIntensitySmoothing = 0.12
     private let emsOutputCurveExp = 1.4
@@ -281,6 +285,16 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         networkManager?.sendRepCount(0)
     }
 
+    /// Apply hold logic; EMS uses no hold so stimulation stops when flex ends.
+    private func activationForOutput(_ avgNormalized: Double, now: Date) -> Double {
+        if avgNormalized >= sensoryThreshold {
+            lastActiveTime = now
+            lastActiveValue = avgNormalized
+        }
+        let inHold = now.timeIntervalSince(lastActiveTime) < effectiveHoldTime
+        return avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
+    }
+
     /// Called by the patient Mac when receiving activation values wirelessly.
     /// Applies hold time logic and drives the TENS/servo, mirroring processNewValue's send path.
     func receiveRemoteActivation(_ value: Double) {
@@ -288,12 +302,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         // network-supplied activations so the servo stays parked at 0°.
         guard isTensEnabled else { return }
         let now = Date()
-        if value >= sensoryThreshold {
-            lastActiveTime = now
-            lastActiveValue = value
-        }
-        let inHold = now.timeIntervalSince(lastActiveTime) < holdTime
-        let sendValue = value >= sensoryThreshold ? value : (inHold ? lastActiveValue : 0.0)
+        let sendValue = activationForOutput(value, now: now)
         let tensLevel = useOpenEMSstim ? mapToEMSOutputLevel(sendValue) : mapToTensLevel(sendValue)
         sendStimulationOutput(activation: sendValue, displayLevel: tensLevel)
         normalizedStrength = value
@@ -334,7 +343,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private func emsCommand(for activation: Double) -> String? {
         let alpha: Double
         if activation < emsSmoothedLevel {
-            alpha = min(1.0, emsIntensitySmoothing * 2.5)
+            alpha = min(1.0, emsIntensitySmoothing * 4.0)
         } else {
             alpha = emsIntensitySmoothing
         }
@@ -348,9 +357,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         let target = max(0, min(raw, ceiling))
         let ramped: Int
         if target > emsLastIntensity {
-            ramped = min(target, emsLastIntensity + emsRampStep)
+            ramped = min(target, emsLastIntensity + emsRampStepUp)
         } else {
-            ramped = max(target, emsLastIntensity - emsRampStep)
+            ramped = max(target, emsLastIntensity - emsRampStepDown)
         }
         emsLastIntensity = ramped
         return "C0I\(ramped)T\(emsPulseDurationMs)G"
@@ -538,12 +547,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             lastTensSent = Date()
             let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
             tensWindowSamples.removeAll()
-            if avgNormalized >= sensoryThreshold {
-                lastActiveTime = Date()
-                lastActiveValue = avgNormalized
-            }
-            let inHold = Date().timeIntervalSince(lastActiveTime) < holdTime
-            let sendValue = avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
+            let sendValue = activationForOutput(avgNormalized, now: Date())
             let displayLevel = useOpenEMSstim
                 ? mapToEMSOutputLevel(mapToTensLevel(sendValue))
                 : mapToTensLevel(sendValue)

@@ -31,7 +31,8 @@ EMS_BAUD = 19200
 EMG_BAUD = 115200
 EMS_BOOT_WAIT_S = 10
 SENSORY_THRESHOLD = 0.15
-RAMP_STEP = 1          # max intensity change per command tick (dial-like; was 5)
+RAMP_STEP_UP = 1
+RAMP_STEP_DOWN = 3
 INTENSITY_SMOOTHING = 0.12  # EMA on activation 0–1 (lower = smoother)
 OUTPUT_CURVE_EXP = 1.4      # >1 = slower approach to ceiling, like easing a dial
 PULSE_DURATION_MS = 150
@@ -63,16 +64,18 @@ def _smoothstep(x: float) -> float:
 class EMSOutput:
     """Maps smoothed activation → ramped EMS intensity commands."""
 
-    def __init__(self, ceiling: int, ramp_step: int = RAMP_STEP, smoothing: float = INTENSITY_SMOOTHING):
+    def __init__(self, ceiling: int, ramp_step_up: int = RAMP_STEP_UP,
+                 ramp_step_down: int = RAMP_STEP_DOWN, smoothing: float = INTENSITY_SMOOTHING):
         self.ceiling = min(ceiling, 100)
-        self.ramp_step = max(1, ramp_step)
+        self.ramp_step_up = max(1, ramp_step_up)
+        self.ramp_step_down = max(1, ramp_step_down)
         self.smoothing = max(0.01, min(1.0, smoothing))
         self.last_intensity = 0
         self.smoothed_level = 0.0
 
     def command_for_level(self, level: float) -> str | None:
         # Follow releases faster than rises (dial back down quicker than up).
-        alpha = self.smoothing * 2.5 if level < self.smoothed_level else self.smoothing
+        alpha = self.smoothing * 4.0 if level < self.smoothed_level else self.smoothing
         alpha = min(1.0, alpha)
         self.smoothed_level += (level - self.smoothed_level) * alpha
 
@@ -83,9 +86,9 @@ class EMSOutput:
         raw = int(curved * self.ceiling + 0.5)
         target = max(0, min(raw, self.ceiling))
         if target > self.last_intensity:
-            ramped = min(target, self.last_intensity + self.ramp_step)
+            ramped = min(target, self.last_intensity + self.ramp_step_up)
         else:
-            ramped = max(target, self.last_intensity - self.ramp_step)
+            ramped = max(target, self.last_intensity - self.ramp_step_down)
         self.last_intensity = ramped
         # Always send explicit I0 while ramping down so the channel fully closes.
         return f"C0I{ramped}T{PULSE_DURATION_MS}G"
@@ -257,7 +260,7 @@ def run_output_loop(
 
 
 def run_simulate(args, port):
-    ems = EMSOutput(args.ceiling, ramp_step=args.ramp_step, smoothing=args.smoothing)
+    ems = EMSOutput(args.ceiling, ramp_step_up=args.ramp_step, smoothing=args.smoothing)
     start = time.time()
 
     def get_norm():
@@ -271,7 +274,7 @@ def run_emg(args, port):
     emg_port = serial.Serial(args.emg, EMG_BAUD, timeout=1)
     time.sleep(2)
     processor = EMGProcessor()
-    ems = EMSOutput(args.ceiling, ramp_step=args.ramp_step, smoothing=args.smoothing)
+    ems = EMSOutput(args.ceiling, ramp_step_up=args.ramp_step, smoothing=args.smoothing)
     data_buffer = ""
 
     def input_listener():
@@ -327,7 +330,7 @@ def run_emg(args, port):
                 avg = sum(window_samples) / len(window_samples)
                 window_samples.clear()
                 _, last_active_time, last_active_value, activation = send_value_with_hold(
-                    avg, last_active_time, last_active_value, now, use_hold=True
+                    avg, last_active_time, last_active_value, now, use_hold=False
                 )
                 cmd = ems.command_for_level(activation)
                 if cmd:
@@ -360,8 +363,8 @@ def main():
                         help="Simulate mode run length in seconds (default 8)")
     parser.add_argument("--cycle", type=float, default=8.0,
                         help="Simulated flex cycle length in seconds (default 8)")
-    parser.add_argument("--ramp-step", type=int, default=RAMP_STEP,
-                        help="Max intensity change per tick (default 1 = dial-like)")
+    parser.add_argument("--ramp-step", type=int, default=RAMP_STEP_UP,
+                        help="Max intensity increase per tick (default 1; down uses 3)")
     parser.add_argument("--smoothing", type=float, default=INTENSITY_SMOOTHING,
                         help="Activation EMA 0–1 (lower = smoother, default 0.12)")
     args = parser.parse_args()
