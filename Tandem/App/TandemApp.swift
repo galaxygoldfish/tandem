@@ -27,7 +27,13 @@ enum AppFlow: Hashable {
 @main
 struct TandemApp: App {
 
-    @StateObject var serialManager = SerialManager()
+    @StateObject private var serialManager: SerialManager = {
+        let manager = SerialManager()
+        manager.useOpenEMSstim = true
+        manager.setupPort()
+        print("[STIM] OUTPUT MODE: openEMSstim — watch console for activation=… I=… lines")
+        return manager
+    }()
     @StateObject var networkManager = NetworkManager()
     @State private var flow: AppFlow = .welcome
 
