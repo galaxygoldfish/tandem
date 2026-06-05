@@ -4,15 +4,14 @@ struct TelehealthPatientView: View {
     @EnvironmentObject var serialManager: SerialManager
     @EnvironmentObject var networkManager: NetworkManager
     var onBack: () -> Void
-
+    
     enum Step { case connect, waiting, session }
     @State private var step: Step = .connect
-    @State private var selectedTherapist: NetworkManager.DiscoveredTherapist?
+    @State private var connectingDisplay: String = ""
     @State private var showSuccess = false
-    @State private var showCodePrompt = false
-    @State private var codeInput = ""
-    @State private var showCodeNotFound = false
-
+    @State private var showIPPrompt = false
+    @State private var ipInput = ""
+    
     var body: some View {
         Group {
             switch step {
@@ -21,7 +20,7 @@ struct TelehealthPatientView: View {
             case .waiting:
                 waitingBody.transition(.onboardingStep)
             case .session:
-                PatientSessionView().transition(.onboardingStep)
+                PatientSessionView(isTelehealth: true).transition(.onboardingStep)
             }
         }
         .animation(.onboardingSpring, value: step)
@@ -39,7 +38,7 @@ struct TelehealthPatientView: View {
             }
         }
     }
-
+    
     private var connectBody: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -69,8 +68,8 @@ struct TelehealthPatientView: View {
             .background(.clear)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             Button("Try another way") {
-                codeInput = ""
-                showCodePrompt = true
+                ipInput = ""
+                showIPPrompt = true
             }
             .buttonStyle(.plain)
             .foregroundStyle(.red)
@@ -79,17 +78,12 @@ struct TelehealthPatientView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .onAppear { networkManager.startBrowsing() }
-        .alert("Enter therapist code", isPresented: $showCodePrompt) {
-            TextField("ABCD", text: $codeInput)
+        .alert("Enter therapist IP address", isPresented: $showIPPrompt) {
+            TextField("192.168.1.5", text: $ipInput)
             Button("Cancel", role: .cancel) { }
-            Button("Link") { submitCode() }
+            Button("Link") { submitIP() }
         } message: {
-            Text("Ask your therapist for the 4 letter code shown at the bottom of their screen.")
-        }
-        .alert("No therapist found", isPresented: $showCodeNotFound) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("No therapist on this network is using that code. Double-check the code and make sure both Macs are on the same network.")
+            Text("Ask your therapist for the IP address shown at the bottom of their screen.")
         }
         .navigationTitle("Tandem")
         .toolbar(removing: .title)
@@ -109,7 +103,7 @@ struct TelehealthPatientView: View {
             .sharedBackgroundVisibility(.hidden)
         }
     }
-
+    
     private func therapistRow(_ therapist: NetworkManager.DiscoveredTherapist) -> some View {
         Button(action: { connect(to: therapist) }) {
             HStack(alignment: .center, spacing: 12) {
@@ -134,17 +128,24 @@ struct TelehealthPatientView: View {
         }
         .buttonStyle(.plain)
     }
-
-    private func submitCode() {
-        if let match = networkManager.therapist(withCode: codeInput) {
-            connect(to: match)
-        } else {
-            showCodeNotFound = true
-        }
+    
+    private func submitIP() {
+        let host = ipInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
+        wireUpCallbacks()
+        connectingDisplay = host
+        networkManager.startReceiver(host: host)
+        step = .waiting
     }
 
     private func connect(to therapist: NetworkManager.DiscoveredTherapist) {
-        selectedTherapist = therapist
+        wireUpCallbacks()
+        connectingDisplay = therapist.name
+        networkManager.connect(to: therapist)
+        step = .waiting
+    }
+
+    private func wireUpCallbacks() {
         networkManager.onActivationReceived = { value in
             serialManager.receiveRemoteActivation(value)
         }
@@ -159,15 +160,13 @@ struct TelehealthPatientView: View {
         networkManager.onTargetRepsReceived = { count in
             serialManager.targetReps = count
         }
-        networkManager.connect(to: therapist)
-        step = .waiting
     }
-
+    
     @ViewBuilder
     private var waitingBody: some View {
         if showSuccess {
             ConnectionSuccessView(
-                title: "Connected to \(selectedTherapist?.name ?? "therapist")"
+                title: "Connected to \(connectingDisplay.isEmpty ? "therapist" : connectingDisplay)"
             )
             .transition(.opacity)
             .navigationTitle("Tandem")
@@ -194,7 +193,7 @@ struct TelehealthPatientView: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 360)
                 } else {
-                    Text("Connecting to \(selectedTherapist?.name ?? "therapist")…")
+                    Text("Connecting to \(connectingDisplay.isEmpty ? "therapist" : connectingDisplay)…")
                         .font(.title2.bold())
                 }
                 Spacer()

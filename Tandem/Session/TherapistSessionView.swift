@@ -52,7 +52,6 @@ struct TherapistSessionView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                pauseButton
                 Spacer()
                 recalibrateButton
                 abortButton
@@ -80,19 +79,6 @@ struct TherapistSessionView: View {
             .font(.system(size: 8))
         let label = serialManager.isConnected ? "Recording connected" : "Recording disconnected"
         return Text("\(dot)  \(label)")
-    }
-
-    private var pauseButton: some View {
-        Button(action: {
-            withAnimation(.spring()) {
-                serialManager.isPaused.toggle()
-            }
-        }) {
-            Image(systemName: serialManager.isPaused ? "play.fill" : "pause.fill")
-                .frame(width: 20)
-        }
-        .buttonStyle(.bordered)
-        .help(serialManager.isPaused ? "Resume stream" : "Pause stream")
     }
 
     private var recalibrateButton: some View {

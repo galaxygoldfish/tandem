@@ -8,11 +8,43 @@ struct PatientSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = true
     @Environment(\.openWindow) private var openWindow
-    
+
+    var isTelehealth: Bool = false
+
     // Track whether the waveform card is collapsed to dynamically resize the video
     @State private var isWaveformCollapsed = true
+    @State private var isConfigExpanded = false
+
+    /// In telehealth mode the exercise and waveform live in separate columns,
+    /// so the video should stay visible regardless of the waveform's state.
+    private var keepExerciseExpanded: Bool {
+        isTelehealth || isWaveformCollapsed
+    }
 
     var body: some View {
+        Group {
+            if isTelehealth {
+                telehealthLayout
+            } else {
+                singleColumnLayout
+            }
+        }
+        .background {
+            if isTelehealth {
+                WindowAccessor { window in maximizeWindow(window) }
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup {
+                Spacer()
+                abortButton
+            }
+        }
+        .navigationTitle("Patient")
+        .navigationSubtitle(tensSubtitle)
+    }
+
+    private var singleColumnLayout: some View {
         VStack(spacing: 0) {
             Spacer()
 
@@ -37,32 +69,33 @@ struct PatientSessionView: View {
 
             Spacer()
 
-            // Pass the collapse state down to the waveform card as a binding
             TensWaveformCard(isCollapsed: $isWaveformCollapsed)
                 .dimmedWhenStimOff(serialManager.isTensEnabled)
 
             Spacer()
-
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Spacer()
-                Button(action: {
-                    withAnimation(.spring()) {
-                        serialManager.isPaused.toggle()
-                    }
-                }) {
-                    Image(systemName: serialManager.isPaused ? "play.fill" : "pause.fill")
-                        .frame(width: 20)
-                }
-                .buttonStyle(.bordered)
-                .help(serialManager.isPaused ? "Resume stream" : "Pause stream")
+    }
 
-                abortButton
+    private var telehealthLayout: some View {
+        HStack(alignment: .top, spacing: 20) {
+            VStack(spacing: 20) {
+                enableStimulationCard
+                configurationCard
+                TensWaveformCard(isCollapsed: $isWaveformCollapsed)
+                    .dimmedWhenStimOff(serialManager.isTensEnabled)
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 20) {
+                exerciseCard
+                    .dimmedWhenStimOff(serialManager.isTensEnabled)
+                RepCounterCard(isEditable: false)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Patient")
-        .navigationSubtitle(tensSubtitle)
+        .padding(20)
     }
 
     private var abortButton: some View {
@@ -84,21 +117,21 @@ struct PatientSessionView: View {
                 .foregroundStyle(.secondary)
             Text("Bicep curl")
                 .font(.title.bold())
-                .padding(.bottom, isWaveformCollapsed ? 10 : 0)
+                .padding(.bottom, keepExerciseExpanded ? 10 : 0)
                 .padding(.top, 5)
-            
+
             if let videoURL = Bundle.main.url(forResource: "MVCAnimation", withExtension: "mov") {
                 LoopingVideoView(url: videoURL, cornerRadius: 10, replayDelay: 3.0)
                     // Collapses the height to 0 when the waveform is visible
                     .frame(
                         maxWidth: .infinity,
-                        maxHeight: isWaveformCollapsed ? .infinity : 0
+                        maxHeight: keepExerciseExpanded ? .infinity : 0
                     )
                     // Fades out and disables interaction to ensure a clean layout switch
-                    .opacity(isWaveformCollapsed ? 1 : 0)
-                    .disabled(!isWaveformCollapsed)
+                    .opacity(keepExerciseExpanded ? 1 : 0)
+                    .disabled(!keepExerciseExpanded)
                     .padding(.horizontal, 5)
-                    .padding(.bottom, isWaveformCollapsed ? 5 : 0)
+                    .padding(.bottom, keepExerciseExpanded ? 5 : 0)
             }
         }
         .padding(20)
@@ -134,7 +167,7 @@ struct PatientSessionView: View {
         .buttonStyle(.plain)
     }
 
-    private var intensityCard: some View {
+    private var intensityCardContent: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Maximum stimulation strength")
                 .font(.title3.bold())
@@ -166,6 +199,40 @@ struct PatientSessionView: View {
                 }
             }
             .padding(.horizontal, 22)
+        }
+    }
+
+    private var intensityCard: some View {
+        intensityCardContent
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var configurationCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isConfigExpanded.toggle()
+                }
+            }) {
+                HStack {
+                    Text("Configuration")
+                        .font(.title3.bold())
+                    Spacer()
+                    Image(systemName: isConfigExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isConfigExpanded {
+                intensityCardContent
+                    .padding(.top, 16)
+                    .dimmedWhenStimOff(serialManager.isTensEnabled)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
