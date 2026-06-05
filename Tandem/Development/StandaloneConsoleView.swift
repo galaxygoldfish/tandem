@@ -28,19 +28,9 @@ struct StandaloneConsoleView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                Button(action: {
-                    withAnimation(.spring()) {
-                        serialManager.isPaused.toggle()
-                    }
-                }) {
-                    Image(systemName: serialManager.isPaused ? "play.fill" : "pause.fill")
-                        .frame(width: 20)
-                }
-                .buttonStyle(.bordered)
-                .help(serialManager.isPaused ? "Resume Stream" : "Pause Stream")
                 Spacer()
                 Button(action: {
-                    serialManager.isConsolePoppedOut = false 
+                    serialManager.isConsolePoppedOut = false
                     dismiss()
                 }) {
                     Image(systemName: "arrow.down.forward.and.arrow.up.backward")

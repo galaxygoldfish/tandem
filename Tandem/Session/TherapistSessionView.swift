@@ -42,13 +42,16 @@ struct TherapistSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 20)
 
+            RepCounterCard(isEditable: true)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+
             if !serialManager.isConsolePoppedOut {
                 consolePanel
             }
         }
         .toolbar {
             ToolbarItemGroup {
-                pauseButton
                 Spacer()
                 recalibrateButton
                 abortButton
@@ -76,19 +79,6 @@ struct TherapistSessionView: View {
             .font(.system(size: 8))
         let label = serialManager.isConnected ? "Recording connected" : "Recording disconnected"
         return Text("\(dot)  \(label)")
-    }
-
-    private var pauseButton: some View {
-        Button(action: {
-            withAnimation(.spring()) {
-                serialManager.isPaused.toggle()
-            }
-        }) {
-            Image(systemName: serialManager.isPaused ? "play.fill" : "pause.fill")
-                .frame(width: 20)
-        }
-        .buttonStyle(.bordered)
-        .help(serialManager.isPaused ? "Resume stream" : "Pause stream")
     }
 
     private var recalibrateButton: some View {

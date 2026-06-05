@@ -40,6 +40,14 @@ func centerMainWindowOnce(_ window: NSWindow) {
     }
 }
 
+/// Resizes `window` to fill the visible frame of its screen (respecting the
+/// menu bar and Dock). Used by the telehealth patient session, which lays out
+/// a two-column UI and needs the extra width.
+func maximizeWindow(_ window: NSWindow) {
+    guard let screen = window.screen ?? NSScreen.main else { return }
+    window.setFrame(screen.visibleFrame, display: true, animate: true)
+}
+
 /// Resizes `window` to half of its screen's visible frame (respecting the
 /// menu bar and Dock). Used to side-by-side the therapist and patient
 /// windows when the session starts.

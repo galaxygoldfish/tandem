@@ -60,7 +60,7 @@ struct TelehealthLinkingView: View {
             ProgressView()
                 .controlSize(.large)
             Spacer()
-            Text("Link code: \(networkManager.sessionCode)")
+            Text("Your IP: \(networkManager.localIP)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 8)

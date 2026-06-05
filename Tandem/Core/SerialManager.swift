@@ -106,6 +106,16 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.5 }
+    // MARK: - Rep Counter
+    @Published var repCount: Int = 0
+    @Published var targetReps: Int = 10 {
+        didSet { networkManager?.sendTargetReps(targetReps) }
+    }
+
+    private enum RepState { case armed, locked }
+    private var repState: RepState = .armed
+    private let repThreshold: Double = 0.65
+    private let repResetThreshold: Double = 0.40
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -239,6 +249,36 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private func mapToTensLevel(_ normalized: Double) -> Double {
         guard normalized >= sensoryThreshold else { return 0.0 }
         return max(0.0, min(1.0, normalized))
+    }
+
+    // MARK: - Rep Counting
+
+    private func checkRep(_ activation: Double) {
+        switch repState {
+        case .armed:
+            if activation >= repThreshold && repCount < targetReps {
+                repCount += 1
+                repState = .locked
+                networkManager?.sendRepCount(repCount)
+            }
+        case .locked:
+            if activation < repResetThreshold {
+                repState = .armed
+            }
+        }
+    }
+
+    func undoLastRep() {
+        guard repCount > 0 else { return }
+        repCount -= 1
+        repState = .armed
+        networkManager?.sendRepCount(repCount)
+    }
+
+    func resetReps() {
+        repCount = 0
+        repState = .armed
+        networkManager?.sendRepCount(0)
     }
 
     /// Called by the patient Mac when receiving activation values wirelessly.
@@ -481,6 +521,20 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             lastTensSent = Date()
             sendStimulationOutput(activation: latestNormalized, displayLevel: tensLevel)
             networkManager?.sendActivation(latestNormalized)
+            let avgNormalized = tensWindowSamples.reduce(0, +) / Double(tensWindowSamples.count)
+            tensWindowSamples.removeAll()
+            let sensoryThreshold = 0.15
+            if avgNormalized >= sensoryThreshold {
+                lastActiveTime = Date()
+                lastActiveValue = avgNormalized
+            }
+            let inHold = Date().timeIntervalSince(lastActiveTime) < holdTime
+            let sendValue = avgNormalized >= sensoryThreshold ? avgNormalized : (inHold ? lastActiveValue : 0.0)
+            sendTensCommand(mapToTensLevel(sendValue))
+            networkManager?.sendActivation(avgNormalized)
+            if calibrationMode == .none {
+                checkRep(avgNormalized)
+            }
         }
 
         // Update UI with latest values.

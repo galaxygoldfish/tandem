@@ -8,13 +8,26 @@ struct ExerciseSelectionView: View {
 
     /// Available exercises. Add new cases here as future protocols come online.
     enum Exercise: String, CaseIterable, Identifiable {
-        case bicepCurl = "Bicep Curl"
+        case bicepCurl    = "Bicep Curl"
+        case shoulderShrug = "Shoulder Shrug"
+        case wristFlex    = "Wrist Flex"
         var id: String { rawValue }
 
-        /// Asset Catalog image displayed on the selection card.
-        var imageName: String {
+        /// Asset Catalog image name. Nil means fall back to `symbolName`.
+        var imageName: String? {
             switch self {
-            case .bicepCurl: return "BicepCurl"
+            case .bicepCurl:    return "BicepCurl"
+            case .shoulderShrug: return "ShoulderShrug"
+            case .wristFlex:    return "WristFlex"
+            }
+        }
+
+        /// SF Symbol used when no asset image is available.
+        var symbolName: String {
+            switch self {
+            case .bicepCurl:    return "figure.strengthtraining.traditional"
+            case .shoulderShrug: return "figure.arms.open"
+            case .wristFlex:    return "hand.raised"
             }
         }
     }
@@ -54,15 +67,21 @@ struct ExerciseSelectionView: View {
     private func exerciseCard(_ exercise: Exercise) -> some View {
         Button(action: { onSelect(exercise) }) {
             VStack(spacing: 12) {
-                Image(exercise.imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let assetName = exercise.imageName {
+                    Image(assetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Image(systemName: exercise.symbolName)
+                        .font(.system(size: 64))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 Text(exercise.rawValue)
                     .font(.title3.bold())
             }
             .padding(20)
-            .frame(width: 220, height: 220)
+            .frame(maxWidth: .infinity, minHeight: 180, maxHeight: 220)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }

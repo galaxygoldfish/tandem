@@ -1,5 +1,6 @@
 import SwiftUI
 import ORSSerial
+import CoreText
 
 /// Linear navigation state for the main onboarding flow.
 ///
@@ -18,6 +19,8 @@ enum AppFlow: Hashable {
     case telehealthExerciseSelect
     case telehealthTherapist(ExerciseSelectionView.Exercise)
     case telehealthPatient
+    // Debug
+    case debugPatientSession
 }
 
 /// App entry point. Hosts three scenes:
@@ -38,8 +41,21 @@ struct TandemApp: App {
     @State private var flow: AppFlow = .welcome
 
     init() {
+        registerBundledFonts()
         let ports = ORSSerialPortManager.shared().availablePorts
         print("Available ports: \(ports.map { $0.path })")
+    }
+
+    /// Registers any .ttf/.otf files bundled with the app so SwiftUI can find
+    /// them via `Font.custom(_:size:)` without needing an Info.plist entry.
+    private func registerBundledFonts() {
+        let extensions = ["ttf", "otf"]
+        for ext in extensions {
+            guard let urls = Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) else { continue }
+            for url in urls {
+                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            }
+        }
     }
 
     var body: some Scene {
@@ -69,8 +85,11 @@ struct TandemApp: App {
         Group {
             switch flow {
             case .welcome:
-                WelcomeView(onStart: { flow = .modeSelect })
-                    .transition(.onboardingStep)
+                WelcomeView(
+                    onStart: { flow = .modeSelect },
+                    onDebugPatientSession: { flow = .debugPatientSession }
+                )
+                .transition(.onboardingStep)
             case .modeSelect:
                 ModeSelectionView(
                     onLocal: { flow = .connect },
@@ -124,6 +143,9 @@ struct TandemApp: App {
                 .transition(.onboardingStep)
             case .telehealthPatient:
                 TelehealthPatientView(onBack: { flow = .telehealthRole })
+                    .transition(.onboardingStep)
+            case .debugPatientSession:
+                PatientSessionView(isTelehealth: true)
                     .transition(.onboardingStep)
             }
         }

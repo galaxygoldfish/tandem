@@ -26,21 +26,13 @@ class NetworkManager: ObservableObject {
             if let listener, !trimmed.isEmpty {
                 listener.service = NWListener.Service(
                     name: trimmed,
-                    type: Self.bonjourServiceType,
-                    txtRecord: NWTXTRecord([Self.codeTXTKey: sessionCode])
+                    type: Self.bonjourServiceType
                 )
             }
         }
     }
 
-    /// Stable 4-letter code patients can type in as an alternative to picking
-    /// the therapist from the discovered list. Advertised via the Bonjour TXT
-    /// record so the receiver can match it without an extra round trip.
-    @Published private(set) var sessionCode: String
-
     private static let therapistNameKey = "tandemTherapistName"
-    private static let sessionCodeKey = "tandemSessionCode"
-    static let codeTXTKey = "code"
 
     /// Bonjour service type used to discover other Tandem therapists.
     static let bonjourServiceType = "_tandem._tcp"
@@ -50,13 +42,16 @@ class NetworkManager: ObservableObject {
         let id: String  // service name doubles as a stable id
         let name: String
         let endpoint: NWEndpoint
-        let code: String?
     }
 
     /// Called on main thread when an activation value arrives (receiver mode).
     var onActivationReceived: ((Double) -> Void)?
     /// Called on main thread when the therapist finishes calibration (receiver mode).
     var onCalibrationReceived: (() -> Void)?
+    /// Called on main thread when the therapist updates the rep count (receiver mode).
+    var onRepCountReceived: ((Int) -> Void)?
+    /// Called on main thread when the therapist updates the target reps (receiver mode).
+    var onTargetRepsReceived: ((Int) -> Void)?
 
     private var listener: NWListener?
     private var senderConnections: [NWConnection] = []
@@ -67,20 +62,6 @@ class NetworkManager: ObservableObject {
         let stored = UserDefaults.standard.string(forKey: Self.therapistNameKey)
         let fallback = Host.current().localizedName ?? "Tandem Therapist"
         self.therapistDisplayName = (stored?.isEmpty == false ? stored : nil) ?? fallback
-
-        if let storedCode = UserDefaults.standard.string(forKey: Self.sessionCodeKey),
-           storedCode.count == 4 {
-            self.sessionCode = storedCode
-        } else {
-            let generated = Self.generateSessionCode()
-            UserDefaults.standard.set(generated, forKey: Self.sessionCodeKey)
-            self.sessionCode = generated
-        }
-    }
-
-    private static func generateSessionCode() -> String {
-        let letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"  // omit I/O to avoid confusion with 1/0
-        return String((0..<4).map { _ in letters.randomElement()! })
     }
 
     // MARK: - Sender (therapist Mac)
@@ -108,8 +89,7 @@ class NetworkManager: ObservableObject {
         let advertisedName = trimmed.isEmpty ? "Tandem Therapist" : trimmed
         newListener.service = NWListener.Service(
             name: advertisedName,
-            type: Self.bonjourServiceType,
-            txtRecord: NWTXTRecord([Self.codeTXTKey: sessionCode])
+            type: Self.bonjourServiceType
         )
 
         newListener.newConnectionHandler = { [weak self] conn in
@@ -161,6 +141,20 @@ class NetworkManager: ObservableObject {
         }
     }
 
+    func sendRepCount(_ count: Int) {
+        guard let data = "REPS:\(count)\n".data(using: .utf8) else { return }
+        for conn in senderConnections {
+            conn.send(content: data, completion: .idempotent)
+        }
+    }
+
+    func sendTargetReps(_ count: Int) {
+        guard let data = "TARGET:\(count)\n".data(using: .utf8) else { return }
+        for conn in senderConnections {
+            conn.send(content: data, completion: .idempotent)
+        }
+    }
+
     /// Called from SerialManager.processNewValue() on the main thread.
     func sendActivation(_ value: Double) {
         guard !senderConnections.isEmpty,
@@ -184,11 +178,7 @@ class NetworkManager: ObservableObject {
         newBrowser.browseResultsChangedHandler = { [weak self] results, _ in
             let mapped: [DiscoveredTherapist] = results.compactMap { result in
                 if case let .service(name, _, _, _) = result.endpoint {
-                    var code: String?
-                    if case let .bonjour(txt) = result.metadata {
-                        code = txt[Self.codeTXTKey]
-                    }
-                    return DiscoveredTherapist(id: name, name: name, endpoint: result.endpoint, code: code)
+                    return DiscoveredTherapist(id: name, name: name, endpoint: result.endpoint)
                 }
                 return nil
             }
@@ -207,15 +197,6 @@ class NetworkManager: ObservableObject {
         discoveredTherapists = []
     }
 
-    /// Finds a discovered therapist whose advertised code matches the input
-    /// (case-insensitive, whitespace-trimmed). Returns the match so the caller
-    /// can connect and surface the therapist's name on the waiting screen.
-    func therapist(withCode code: String) -> DiscoveredTherapist? {
-        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard normalized.count == 4 else { return nil }
-        return discoveredTherapists.first { $0.code?.uppercased() == normalized }
-    }
-
     /// Connects to a therapist that was discovered via Bonjour. Mirrors
     /// `startReceiver(host:port:)` but uses the resolved endpoint directly so
     /// the patient never has to type an IP.
@@ -232,12 +213,17 @@ class NetworkManager: ObservableObject {
                 case .ready:
                     self?.isConnected = true
                     self?.connectionStatus = "Connected to \(therapist.name)"
+                    // Keep the browser alive through resolution, then drop it
+                    // once the TCP connection is up — canceling earlier can
+                    // strand the mDNS resolver and stall the first connect.
+                    self?.stopBrowsing()
                     if let conn = self?.receiverConnection {
                         self?.receive(on: conn)
                     }
                 case .failed(let error):
                     self?.isConnected = false
                     self?.connectionStatus = "Failed: \(error.localizedDescription)"
+                    self?.stopBrowsing()
                 case .cancelled:
                     self?.isConnected = false
                     self?.connectionStatus = "Disconnected"
@@ -252,7 +238,7 @@ class NetworkManager: ObservableObject {
 
     func startReceiver(host: String, port: UInt16 = 9000) {
         wirelessMode = .receiver
-        connectionStatus = "Connecting..."
+        connectionStatus = "Connecting to \(host)..."
 
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             connectionStatus = "Invalid port"
@@ -267,7 +253,8 @@ class NetworkManager: ObservableObject {
                 switch state {
                 case .ready:
                     self?.isConnected = true
-                    self?.connectionStatus = "Connected"
+                    self?.connectionStatus = "Connected to \(host)"
+                    self?.stopBrowsing()
                     if let conn = self?.receiverConnection {
                         self?.receive(on: conn)
                     }
@@ -309,6 +296,10 @@ class NetworkManager: ObservableObject {
                     let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
                     if clean == "CALIBRATED" {
                         DispatchQueue.main.async { self.onCalibrationReceived?() }
+                    } else if clean.hasPrefix("REPS:"), let count = Int(clean.dropFirst(5)) {
+                        DispatchQueue.main.async { self.onRepCountReceived?(count) }
+                    } else if clean.hasPrefix("TARGET:"), let count = Int(clean.dropFirst(7)) {
+                        DispatchQueue.main.async { self.onTargetRepsReceived?(count) }
                     } else if let value = Double(clean) {
                         DispatchQueue.main.async { self.onActivationReceived?(value) }
                     }

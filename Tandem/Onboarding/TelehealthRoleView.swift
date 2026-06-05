@@ -16,14 +16,14 @@ struct TelehealthRoleView: View {
                     title: "Therapist",
                     subtitle: "",
                     systemImage: "waveform.path.ecg",
-                    color: .blue.opacity(0.5),
+                    color: .green.opacity(0.5),
                     action: onTherapist
                 )
                 roleCard(
                     title: "Patient",
                     subtitle: "",
                     systemImage: "bolt.fill",
-                    color: .purple.opacity(0.5),
+                    color: .red.opacity(0.5),
                     action: onPatient
                 )
             }

@@ -132,8 +132,6 @@ struct TherapistView: View {
 
             if isTelehealth {
                 telehealthSenderStatusCard
-            } else {
-                wirelessSenderCard
             }
 
             Button(action: { step = .calibrationBaseline }) {
@@ -496,6 +494,7 @@ struct TherapistView: View {
             }
             try? await Task.sleep(for: .seconds(1))
             serialManager.calibrationCompleted = true
+            serialManager.resetReps()
             if isTelehealth { networkManager.sendCalibrationComplete() }
             step = .session
         }
