@@ -70,7 +70,8 @@ struct TherapistSessionView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(.red)
-        .help("Abort session")
+        .keyboardShortcut(.space, modifiers: [])
+        .help("Abort session (Space)")
     }
 
     private var connectionSubtitle: Text {

@@ -31,7 +31,6 @@ struct TensWaveformCard: View {
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 20)
     }
 
     private var header: some View {

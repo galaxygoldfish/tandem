@@ -34,14 +34,25 @@ struct PatientSessionView: View {
                 WindowAccessor { window in maximizeWindow(window) }
             }
         }
+        .background(spacebarAbortShortcut)
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
-                abortButton
             }
         }
         .navigationTitle("Patient")
         .navigationSubtitle(tensSubtitle)
+    }
+
+    /// Invisible button that registers Space as a global abort shortcut for
+    /// this view, so a hard stop is always one keystroke away regardless of
+    /// which layout is on screen.
+    private var spacebarAbortShortcut: some View {
+        Button("Abort") { serialManager.hardStop() }
+            .keyboardShortcut(.space, modifiers: [])
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
     }
 
     private var singleColumnLayout: some View {
@@ -77,25 +88,54 @@ struct PatientSessionView: View {
     }
 
     private var telehealthLayout: some View {
-        HStack(alignment: .top, spacing: 20) {
-            VStack(spacing: 20) {
-                enableStimulationCard
-                configurationCard
-                TensWaveformCard(isCollapsed: $isWaveformCollapsed)
-                    .dimmedWhenStimOff(serialManager.isTensEnabled)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
+        VStack(spacing: 0) {
+            GeometryReader { geo in
+                let spacing: CGFloat = 20
+                let horizontalPadding: CGFloat = 20
+                let available = max(0, geo.size.width - horizontalPadding * 2 - spacing)
+                HStack(alignment: .top, spacing: spacing) {
+                    VStack(spacing: 20) {
+                        enableStimulationCard
+                        configurationCard
+                        TensWaveformCard(isCollapsed: $isWaveformCollapsed)
+                            .dimmedWhenStimOff(serialManager.isTensEnabled)
+                        Spacer()
+                    }
+                    .frame(width: available * 0.40)
 
-            VStack(spacing: 20) {
-                exerciseCard
-                    .dimmedWhenStimOff(serialManager.isTensEnabled)
-                RepCounterCard(isEditable: false)
-                Spacer(minLength: 0)
+                    VStack(spacing: 20) {
+                        exerciseCard
+                            .frame(maxHeight: .infinity)
+                            .dimmedWhenStimOff(serialManager.isTensEnabled)
+                        RepCounterCard(isEditable: false)
+                    }
+                    .frame(width: available * 0.60, height: nil)
+                    .frame(maxHeight: .infinity)
+                }
+                .padding(.horizontal, horizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+            Button(action: { serialManager.hardStop() }) {
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        Text("ABORT")
+                            .font(.largeTitle.monospaced().bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                    Text("Spacebar")
+                        .font(.body)
+                        .opacity(0.5)
+                }
+                .padding(.vertical, 20)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.red.opacity(0.8))
+            .help("Abort session")
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
         }
-        .padding(20)
     }
 
     private var abortButton: some View {
@@ -135,7 +175,7 @@ struct PatientSessionView: View {
             }
         }
         .padding(20)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         // Smoothly animates the card resizing when the state changes
@@ -156,13 +196,20 @@ struct PatientSessionView: View {
                 Toggle("Enable stimulation", isOn: $serialManager.isTensEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .tint(.green)
                     .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
             .padding(20)
             .frame(maxWidth: .infinity)
+            .background {
+                if serialManager.isTensEnabled {
+                    Color.green.opacity(0.55)
+                }
+            }
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .animation(.easeInOut(duration: 0.2), value: serialManager.isTensEnabled)
         }
         .buttonStyle(.plain)
     }
@@ -170,8 +217,8 @@ struct PatientSessionView: View {
     private var intensityCardContent: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Maximum stimulation strength")
-                .font(.title3.bold())
-            Text("This is the highest value you will be stimulated at - turn down for less intensity and turn up if you don't see movement")
+                .font(.body)
+            Text("This is the highest possible value you will be stimulated at")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -200,6 +247,7 @@ struct PatientSessionView: View {
             }
             .padding(.horizontal, 22)
         }
+        .padding(.top, 15)
     }
 
     private var intensityCard: some View {
