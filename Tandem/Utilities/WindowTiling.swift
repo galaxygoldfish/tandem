@@ -11,8 +11,8 @@ enum TileSide {
 /// can resize/move the window after launch without it snapping back.
 private var hasCenteredMainWindow = false
 
-/// Sizes the main window to half the screen width × three-quarters height
-/// and centers it on the active screen. Runs at most once per app launch.
+/// Sizes the main window to fill its screen's visible frame on launch.
+/// Runs at most once per app launch.
 ///
 /// Clears the window's frame autosave name and defers the resize to the next
 /// runloop tick so AppKit's state restoration (which fires after
@@ -27,16 +27,7 @@ func centerMainWindowOnce(_ window: NSWindow) {
 
     DispatchQueue.main.async {
         guard let screen = window.screen ?? NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let width = visible.width / 2
-        let height = visible.height * 3 / 4
-        let originX = visible.minX + (visible.width - width) / 2
-        let originY = visible.minY + (visible.height - height) / 2
-        window.setFrame(
-            NSRect(x: originX, y: originY, width: width, height: height),
-            display: true,
-            animate: false
-        )
+        window.setFrame(screen.visibleFrame, display: true, animate: false)
     }
 }
 

@@ -20,7 +20,7 @@ struct TensWaveformCard: View {
                     data: serialManager.tensPlotData,
                     isRecording: false,
                     isConnected: serialManager.isTensConnected,
-                    tint: .red
+                    lineColor: .red
                 )
                 .frame(height: 200)
                 .animation(.linear(duration: 0.05), value: serialManager.tensPlotData)
@@ -30,7 +30,7 @@ struct TensWaveformCard: View {
         .padding(20)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 35))
     }
 
     private var header: some View {

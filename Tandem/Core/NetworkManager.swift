@@ -57,6 +57,14 @@ class NetworkManager: ObservableObject {
     private var senderConnections: [NWConnection] = []
     private var receiverConnection: NWConnection?
     private var browser: NWBrowser?
+    /// Watchdog timer: if the receiver connection doesn't reach `.ready`
+    /// within `connectTimeout` we cancel and restart, since the first attempt
+    /// can silently stall while mDNS resolves.
+    private var connectWatchdog: DispatchWorkItem?
+    private var pendingTherapist: DiscoveredTherapist?
+    private var connectAttempt: Int = 0
+    private let maxConnectAttempts = 3
+    private let connectTimeout: TimeInterval = 3.0
 
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.therapistNameKey)
@@ -201,37 +209,110 @@ class NetworkManager: ObservableObject {
     /// `startReceiver(host:port:)` but uses the resolved endpoint directly so
     /// the patient never has to type an IP.
     func connect(to therapist: DiscoveredTherapist) {
-        wirelessMode = .receiver
-        connectionStatus = "Connecting to \(therapist.name)..."
+        pendingTherapist = therapist
+        connectAttempt = 0
+        attemptConnect()
+    }
 
-        let conn = NWConnection(to: therapist.endpoint, using: .tcp)
+    /// Starts (or restarts) the receiver connection to `pendingTherapist`.
+    /// We retry up to `maxConnectAttempts` times because the first NWConnection
+    /// to a Bonjour endpoint can stall in `.preparing` while mDNS resolves; a
+    /// watchdog cancels and retries when that happens so the patient never has
+    /// to manually disconnect and re-tap.
+    private func attemptConnect() {
+        guard let therapist = pendingTherapist else { return }
+
+        // Tear down any leftover connection before starting a new one. Without
+        // this, an aborted previous attempt can keep its NWConnection alive in
+        // the background and confuse state reporting on the new one.
+        receiverConnection?.cancel()
+        receiverConnection = nil
+        connectWatchdog?.cancel()
+        connectWatchdog = nil
+
+        connectAttempt += 1
+        wirelessMode = .receiver
+        connectionStatus = connectAttempt == 1
+            ? "Connecting to \(therapist.name)..."
+            : "Retrying \(therapist.name)..."
+
+        // `includePeerToPeer = true` lets Network.framework use the same
+        // peer-to-peer discovery path mDNS browsing uses, which dramatically
+        // reduces the chance of the first resolution stalling.
+        let params = NWParameters.tcp
+        params.includePeerToPeer = true
+
+        let conn = NWConnection(to: therapist.endpoint, using: params)
         receiverConnection = conn
 
         conn.stateUpdateHandler = { [weak self] state in
             DispatchQueue.main.async {
+                guard let self else { return }
+                // Ignore late callbacks from a connection we've already replaced.
+                guard conn === self.receiverConnection else { return }
                 switch state {
                 case .ready:
-                    self?.isConnected = true
-                    self?.connectionStatus = "Connected to \(therapist.name)"
+                    self.connectWatchdog?.cancel()
+                    self.connectWatchdog = nil
+                    self.pendingTherapist = nil
+                    self.connectAttempt = 0
+                    self.isConnected = true
+                    self.connectionStatus = "Connected to \(therapist.name)"
                     // Keep the browser alive through resolution, then drop it
                     // once the TCP connection is up — canceling earlier can
                     // strand the mDNS resolver and stall the first connect.
-                    self?.stopBrowsing()
-                    if let conn = self?.receiverConnection {
-                        self?.receive(on: conn)
-                    }
+                    self.stopBrowsing()
+                    self.receive(on: conn)
+                case .waiting:
+                    // `.waiting` means the system gave up on the current
+                    // attempt (typically resolution failure). Cancel + retry
+                    // immediately instead of letting it sit forever.
+                    self.retryConnectIfPossible(reason: "waiting")
                 case .failed(let error):
-                    self?.isConnected = false
-                    self?.connectionStatus = "Failed: \(error.localizedDescription)"
-                    self?.stopBrowsing()
+                    self.connectWatchdog?.cancel()
+                    self.connectWatchdog = nil
+                    if self.connectAttempt < self.maxConnectAttempts {
+                        self.retryConnectIfPossible(reason: "failed: \(error.localizedDescription)")
+                    } else {
+                        self.pendingTherapist = nil
+                        self.isConnected = false
+                        self.connectionStatus = "Failed: \(error.localizedDescription)"
+                        self.stopBrowsing()
+                    }
                 case .cancelled:
-                    self?.isConnected = false
-                    self?.connectionStatus = "Disconnected"
+                    // Cancellation can be either ours (retry/teardown) or
+                    // user-initiated; the surrounding code paths set status
+                    // appropriately, so do nothing here.
+                    break
                 default: break
                 }
             }
         }
         conn.start(queue: .global(qos: .userInitiated))
+        scheduleConnectWatchdog()
+    }
+
+    private func scheduleConnectWatchdog() {
+        connectWatchdog?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // If we're already connected, nothing to do.
+            guard !self.isConnected, self.pendingTherapist != nil else { return }
+            self.retryConnectIfPossible(reason: "timeout")
+        }
+        connectWatchdog = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + connectTimeout, execute: item)
+    }
+
+    private func retryConnectIfPossible(reason: String) {
+        guard pendingTherapist != nil else { return }
+        guard connectAttempt < maxConnectAttempts else {
+            connectionStatus = "Failed to connect (\(reason))"
+            isConnected = false
+            pendingTherapist = nil
+            return
+        }
+        attemptConnect()
     }
 
     // MARK: - Receiver (patient Mac)
@@ -273,6 +354,10 @@ class NetworkManager: ObservableObject {
     }
 
     func stopReceiver() {
+        connectWatchdog?.cancel()
+        connectWatchdog = nil
+        pendingTherapist = nil
+        connectAttempt = 0
         receiverConnection?.cancel()
         receiverConnection = nil
         wirelessMode = .none

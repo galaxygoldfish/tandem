@@ -8,34 +8,38 @@ struct WelcomeView: View {
     var onDebugPatientSession: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(alignment: .center, spacing: 24) {
             Spacer()
-            Image(nsImage: NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) ?? NSImage())
-                .resizable()
-                .scaledToFit()
-                .frame(height: 120)
-            Text("Tandem")
-                .font(.custom("Silkscreen-Regular", size: 64))
-                .tracking(-7.68)
-                .padding(.top, 30)
-            Text("A human to human interface for naturalistic communication of motor movements tailored to physical therapy contexts")
-                .font(.default)
-                .frame(maxWidth: 550)
-                .multilineTextAlignment(.center)
-            Button(action: onStart) {
-                HStack {
-                    Text("Start")
-                        .padding(.leading, 10)
-                    Image(systemName: "arrow.right")
-                        .padding(.leading, 10)
-                        .padding(.vertical, 10)
-                        .padding(.trailing, 10)
-                }
+            HStack(spacing: 16) {
+                Image("LightningBolt")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 120)
+                Text("Tandem")
+                    .font(.custom("Silkscreen-Regular", size: 140))
+                    .tracking(-12)
+                    .foregroundStyle(.black)
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
             .padding(.top, 30)
-            Button("Debug: patient session", action: onDebugPatientSession)
+            Text("Together in motion")
+                .font(.custom("Silkscreen-Regular", size: 40))
+                .tracking(-5)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.black.opacity(0.5))
+            Spacer()
+            Button(action: onStart) {
+                HStack(spacing: 16) {
+                    Text("Start")
+                        .font(.custom("IBMPlexMono-Regular", size: 28))
+                        .padding(.horizontal, 30)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 48)
+                .padding(.vertical, 24)
+                .background(Color.black, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            Button("Debug: therapist session", action: onDebugPatientSession)
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -44,13 +48,9 @@ struct WelcomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .background(WindowAccessor { centerMainWindowOnce($0) })
-        .navigationTitle("Tandem")
+        .navigationTitle("")
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Color.clear.frame(height: 40)
-            }
-            .sharedBackgroundVisibility(.hidden)
         }
     }
 }

@@ -5,7 +5,7 @@ import SwiftUI
 /// names who you just linked to.
 struct ConnectionSuccessView: View {
     let title: String
-    @State private var didAppear = false
+    @State private var contentVisible = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -14,26 +14,25 @@ struct ConnectionSuccessView: View {
                 Circle()
                     .fill(Color.green)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 64, weight: .bold))
+                    .font(.system(size: 130, weight: .bold))
                     .foregroundColor(.white)
             }
-            .frame(width: 140, height: 140)
-            .scaleEffect(didAppear ? 1.0 : 0.3)
-            .opacity(didAppear ? 1.0 : 0)
+            .frame(width: 200, height: 200)
+            .scaleEffect(contentVisible ? 1 : 0.6)
+            .opacity(contentVisible ? 1 : 0)
+            .animation(.snappy(duration: 0.3, extraBounce: 0.35).delay(0.04), value: contentVisible)
             Text(title)
-                .font(.title.bold())
+                .font(.custom("IBMPlexMono-Medium", size: 40))
+                .tracking(-1)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-                .opacity(didAppear ? 1.0 : 0)
-                .padding(.top, 20)
+                .padding(.top, 50)
+                .scaleEffect(contentVisible ? 1 : 0.6)
+                .opacity(contentVisible ? 1 : 0)
+                .animation(.snappy(duration: 0.3, extraBounce: 0.35).delay(0.1), value: contentVisible)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.55)) {
-                didAppear = true
-            }
-        }
+        .onAppear { contentVisible = true }
     }
 }

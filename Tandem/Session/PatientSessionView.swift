@@ -50,6 +50,7 @@ struct PatientSessionView: View {
     private var spacebarAbortShortcut: some View {
         Button("Abort") { serialManager.hardStop() }
             .keyboardShortcut(.space, modifiers: [])
+            .disabled(!serialManager.isTensEnabled) // Can't abort if it's already off
             .opacity(0)
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
@@ -71,6 +72,7 @@ struct PatientSessionView: View {
 
             RepCounterCard(isEditable: false)
                 .padding(.horizontal, 20)
+                .dimmedWhenStimOff(serialManager.isTensEnabled) // Muted when stimulation is off
 
             Spacer()
 
@@ -96,9 +98,10 @@ struct PatientSessionView: View {
                 HStack(alignment: .top, spacing: spacing) {
                     VStack(spacing: 20) {
                         enableStimulationCard
+                        
                         configurationCard
-                        TensWaveformCard(isCollapsed: $isWaveformCollapsed)
-                            .dimmedWhenStimOff(serialManager.isTensEnabled)
+                            .dimmedWhenStimOff(serialManager.isTensEnabled) // Entire card disabled when off
+                        
                         Spacer()
                     }
                     .frame(width: available * 0.40)
@@ -107,7 +110,9 @@ struct PatientSessionView: View {
                         exerciseCard
                             .frame(maxHeight: .infinity)
                             .dimmedWhenStimOff(serialManager.isTensEnabled)
+                        
                         RepCounterCard(isEditable: false)
+                            .dimmedWhenStimOff(serialManager.isTensEnabled) // Muted when stimulation is off
                     }
                     .frame(width: available * 0.60, height: nil)
                     .frame(maxHeight: .infinity)
@@ -116,6 +121,8 @@ struct PatientSessionView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .padding(.vertical, 20)
+            
+            // Abort Action Button (Changes visually to gray when stimulation is disabled)
             Button(action: { serialManager.hardStop() }) {
                 VStack(spacing: 6) {
                     HStack(spacing: 10) {
@@ -131,10 +138,13 @@ struct PatientSessionView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(.red.opacity(0.8))
+            .tint(serialManager.isTensEnabled ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
+            .foregroundStyle(serialManager.isTensEnabled ? .white : .secondary)
+            .disabled(!serialManager.isTensEnabled) // Hard stop is interactive only when stimulation runs
             .help("Abort session")
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
+            .animation(.easeInOut(duration: 0.2), value: serialManager.isTensEnabled)
         }
     }
 
@@ -146,7 +156,8 @@ struct PatientSessionView: View {
             }
         }
         .buttonStyle(.borderedProminent)
-        .tint(.red)
+        .tint(serialManager.isTensEnabled ? .red : .gray)
+        .disabled(!serialManager.isTensEnabled)
         .help("Abort session")
     }
 
@@ -161,23 +172,28 @@ struct PatientSessionView: View {
                 .padding(.top, 5)
 
             if let videoURL = Bundle.main.url(forResource: "MVCAnimation", withExtension: "mov") {
-                LoopingVideoView(url: videoURL, cornerRadius: 10, replayDelay: 3.0)
-                    // Collapses the height to 0 when the waveform is visible
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: keepExerciseExpanded ? .infinity : 0
-                    )
-                    // Fades out and disables interaction to ensure a clean layout switch
-                    .opacity(keepExerciseExpanded ? 1 : 0)
-                    .disabled(!keepExerciseExpanded)
-                    .padding(.horizontal, 5)
-                    .padding(.bottom, keepExerciseExpanded ? 5 : 0)
+                LoopingVideoView(
+                    url: videoURL,
+                    cornerRadius: 35,
+                    replayDelay: 3.0,
+                    isPlaying: serialManager.isTensEnabled // <-- Ties video freezing directly to switch state
+                )
+                // Collapses the height to 0 when the waveform is visible
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: keepExerciseExpanded ? .infinity : 0
+                )
+                // Fades out and disables interaction to ensure a clean layout switch
+                .opacity(keepExerciseExpanded ? 1 : 0)
+                .padding(.horizontal, 5)
+                .padding(.bottom, keepExerciseExpanded ? 5 : 0)
+                .disabled(!serialManager.isTensEnabled || !keepExerciseExpanded)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 35))
         // Smoothly animates the card resizing when the state changes
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isWaveformCollapsed)
     }
@@ -186,11 +202,12 @@ struct PatientSessionView: View {
         Button(action: { serialManager.isTensEnabled.toggle() }) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Enable stimulation")
-                        .font(.title3.bold())
-                    Text("This allows the therapist's movement to be translated to your muscles")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // Toggles reading string dynamically based on hardware activation loop
+                    Text(serialManager.isTensEnabled ? "Stimulation enabled" : "Stimulation disabled")
+                        .font(.custom("IBMPlexMono-Medium", size: 25))
+                        .tracking(-1)
+                        // Sets white for high contrast on active solid red, black for pale green frame
+                        .foregroundStyle(serialManager.isTensEnabled ? .black : .white)
                 }
                 Spacer()
                 Toggle("Enable stimulation", isOn: $serialManager.isTensEnabled)
@@ -200,15 +217,19 @@ struct PatientSessionView: View {
                     .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
-            .padding(20)
+            .padding(.vertical, 50)
+            .padding(.horizontal, 35)
             .frame(maxWidth: .infinity)
             .background {
+                // Background fills with solid diagnostic alert shades based on live states
                 if serialManager.isTensEnabled {
                     Color.green.opacity(0.55)
+                } else {
+                    Color.red.opacity(0.8) // Smooth bright red background color when disabled
                 }
             }
             .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 35))
             .animation(.easeInOut(duration: 0.2), value: serialManager.isTensEnabled)
         }
         .buttonStyle(.plain)
@@ -271,7 +292,7 @@ struct PatientSessionView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
             .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 35))
     }
 
     private var configurationCard: some View {
@@ -295,20 +316,19 @@ struct PatientSessionView: View {
             if isConfigExpanded {
                 intensityCardContent
                     .padding(.top, 16)
-                    .dimmedWhenStimOff(serialManager.isTensEnabled)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 35))
     }
 
     private var tensSubtitle: Text {
         let dot = Text(Image(systemName: "circle.fill"))
             .foregroundColor(serialManager.isTensConnected ? .green : .red)
             .font(.system(size: 8))
-        let label = serialManager.isTensConnected ? "Stimulation connected" : "Stimulation disconnected"
+        let label = serialManager.isTensConnected ? "Patient unit connected" : "Patient unit disconnected"
         return Text("\(dot)  \(label)")
     }
 
@@ -326,8 +346,8 @@ struct PatientSessionView: View {
         .frame(height: isConsoleMinimized ? 40 : nil)
         .frame(maxWidth: .infinity, maxHeight: isConsoleMinimized ? 40 : 300)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 15))
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.2), lineWidth: 1.5))
+        .clipShape(RoundedRectangle(cornerRadius: 35))
+        .overlay(RoundedRectangle(cornerRadius: 35).stroke(.white.opacity(0.2), lineWidth: 1.5))
         .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 10)
         .padding(10)
     }

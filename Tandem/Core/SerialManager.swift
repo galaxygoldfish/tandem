@@ -412,9 +412,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 isTensConnected = false
                 Logger.serial.info("Opening openEMSstim port: \(port.path)")
                 DispatchQueue.main.async {
-                    self.logs.append(LogEntry(text: "OPENING EMS: \(port.path) (10s init)"))
+                    self.logs.append(LogEntry(text: "OPENING EMS: \(port.path)"))
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0) { [weak self] in
                     guard let self, self.tensPort?.path == port.path else { return }
                     self.emsReady = true
                     self.isTensConnected = true

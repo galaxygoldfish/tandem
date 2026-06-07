@@ -36,11 +36,13 @@ struct ExerciseSelectionView: View {
         VStack(spacing: 24) {
             Spacer()
             Text("Choose an exercise")
-                .font(.title.bold())
-            Text("Select the exercise to perform during this session")
-                .foregroundStyle(.secondary)
+                .font(.custom("IBMPlexMono-Medium", size: 40))
+                .tracking(-1)
+            Text("Select the exercise that you'll be working with during this session")
+                .font(.custom("IBMPlexMono-Regular", size: 16))
+                .foregroundStyle(.black.opacity(0.6))
             Spacer()
-            HStack(spacing: 16) {
+            HStack(spacing: 40) {
                 ForEach(Exercise.allCases) { exercise in
                     exerciseCard(exercise)
                 }
@@ -50,6 +52,7 @@ struct ExerciseSelectionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .navigationTitle("Tandem")
+        .toolbar(removing: .title)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -57,8 +60,8 @@ struct ExerciseSelectionView: View {
                     Image(systemName: "chevron.left")
                 }
             }
-            ToolbarItem(placement: .principal) {
-                Color.clear.frame(height: 40)
+            ToolbarItem(placement: .navigation) {
+                TandemTitleBar()
             }
             .sharedBackgroundVisibility(.hidden)
         }
@@ -78,12 +81,14 @@ struct ExerciseSelectionView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 Text(exercise.rawValue)
-                    .font(.title3.bold())
+                    .font(.custom("IBMPlexMono-Medium", size: 20))
+                    .padding(.bottom, 20)
             }
             .padding(20)
-            .frame(maxWidth: .infinity, minHeight: 180, maxHeight: 220)
+            .frame(width: 350, height: 350)
             .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 40))
+            .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 40))
         }
         .buttonStyle(.plain)
     }

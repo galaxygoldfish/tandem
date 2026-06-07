@@ -7,9 +7,6 @@ import AVKit
 /// and exposes a `cornerRadius`, an optional `replayDelay` to hold on the
 /// last frame between loops, and an `isPlaying` switch that freezes the
 /// video on its final frame when set to false.
-///
-/// Used for the bicep-curl reference animation in `PatientSessionView`
-/// and the baseline/MVC calibration animations in `TherapistView`.
 struct LoopingVideoView: NSViewRepresentable {
     let url: URL
     var cornerRadius: CGFloat = 0
@@ -17,7 +14,7 @@ struct LoopingVideoView: NSViewRepresentable {
     var isPlaying: Bool = true
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(self)
     }
 
     func makeNSView(context: Context) -> PlayerContainerView {
@@ -30,39 +27,56 @@ struct LoopingVideoView: NSViewRepresentable {
         view.playerLayer.masksToBounds = true
 
         context.coordinator.player = player
-        let delay = replayDelay
+        
         context.coordinator.observer = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
-        ) { _ in
+        ) { [weak coordinator = context.coordinator] _ in
+            guard let coordinator = coordinator, let player = coordinator.player else { return }
+            
+            // CRITICAL: Only loop if we are actually supposed to be playing
+            guard coordinator.parent.isPlaying else { return }
+            
+            let delay = coordinator.parent.replayDelay
             if delay > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak player] in
-                    player?.seek(to: .zero)
-                    player?.play()
+                    // Re-verify playing state after the asynchronous delay block fires
+                    guard let player = player, coordinator.parent.isPlaying else { return }
+                    player.seek(to: .zero)
+                    player.play()
                 }
             } else {
                 player.seek(to: .zero)
                 player.play()
             }
         }
-        player.play()
+        
+        if isPlaying {
+            player.play()
+        }
         return view
     }
 
     func updateNSView(_ nsView: PlayerContainerView, context: Context) {
         nsView.playerLayer.cornerRadius = cornerRadius
+        
+        // Keep the coordinator's reference to parent updated
+        context.coordinator.parent = self
+        
         guard let player = context.coordinator.player else { return }
+        
         if isPlaying {
             if player.timeControlStatus != .playing {
                 player.play()
             }
         } else {
+            player.pause()
+            // Optional: If you want it to snap to the end frame instantly upon disabling:
             if let duration = player.currentItem?.duration,
                duration.isValid, !duration.isIndefinite {
                 player.seek(to: duration, toleranceBefore: .zero, toleranceAfter: .zero)
             }
-            player.pause()
         }
     }
 
@@ -74,8 +88,13 @@ struct LoopingVideoView: NSViewRepresentable {
     }
 
     final class Coordinator {
+        var parent: LoopingVideoView
         var player: AVPlayer?
         var observer: NSObjectProtocol?
+        
+        init(_ parent: LoopingVideoView) {
+            self.parent = parent
+        }
     }
 
     final class PlayerContainerView: NSView {

@@ -77,7 +77,7 @@ struct RepCounterCard: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 35))
     }
 
     private var repCircles: some View {

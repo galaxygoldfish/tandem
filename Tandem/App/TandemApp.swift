@@ -15,6 +15,8 @@ enum AppFlow: Hashable {
     case therapist(ExerciseSelectionView.Exercise)
     // Telehealth
     case telehealthRole
+    case telehealthTherapistConnect
+    case telehealthPatientConnect
     case telehealthLinking
     case telehealthExerciseSelect
     case telehealthTherapist(ExerciseSelectionView.Exercise)
@@ -80,7 +82,31 @@ struct TandemApp: App {
         }
     }
 
+    /// Flow states that share the soft welcome gradient background. Keeping the
+    /// image outside the per-screen transition prevents it from sliding during
+    /// the welcome ↔ mode-select hand-off.
+    private var showsWelcomeBackground: Bool {
+        switch flow {
+        case .welcome, .modeSelect: return true
+        default: return false
+        }
+    }
+
     private var rootView: some View {
+        ZStack {
+            if showsWelcomeBackground {
+                Image("WelcomeBackground")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
+            flowContent
+        }
+        .animation(.onboardingSpring, value: showsWelcomeBackground)
+    }
+
+    private var flowContent: some View {
         Group {
             switch flow {
             case .welcome:
@@ -116,15 +142,29 @@ struct TandemApp: App {
                 .transition(.onboardingStep)
             case .telehealthRole:
                 TelehealthRoleView(
-                    onTherapist: { flow = .telehealthLinking },
-                    onPatient: { flow = .telehealthPatient },
+                    onTherapist: { flow = .telehealthTherapistConnect },
+                    onPatient: { flow = .telehealthPatientConnect },
                     onBack: { flow = .modeSelect }
+                )
+                .transition(.onboardingStep)
+            case .telehealthTherapistConnect:
+                TelehealthHardwareConnectionView(
+                    device: .therapist,
+                    onContinue: { flow = .telehealthLinking },
+                    onBack: { flow = .telehealthRole }
+                )
+                .transition(.onboardingStep)
+            case .telehealthPatientConnect:
+                TelehealthHardwareConnectionView(
+                    device: .patient,
+                    onContinue: { flow = .telehealthPatient },
+                    onBack: { flow = .telehealthRole }
                 )
                 .transition(.onboardingStep)
             case .telehealthLinking:
                 TelehealthLinkingView(
                     onLinked: { flow = .telehealthExerciseSelect },
-                    onBack: { flow = .telehealthRole }
+                    onBack: { flow = .telehealthTherapistConnect }
                 )
                 .transition(.onboardingStep)
             case .telehealthExerciseSelect:
@@ -141,10 +181,10 @@ struct TandemApp: App {
                 )
                 .transition(.onboardingStep)
             case .telehealthPatient:
-                TelehealthPatientView(onBack: { flow = .telehealthRole })
+                TelehealthPatientView(onBack: { flow = .telehealthPatientConnect })
                     .transition(.onboardingStep)
             case .debugPatientSession:
-                PatientSessionView(isTelehealth: true)
+                TherapistSessionView(isTelehealth: true)
                     .transition(.onboardingStep)
             }
         }
