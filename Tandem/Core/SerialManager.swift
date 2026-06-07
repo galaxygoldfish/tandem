@@ -87,7 +87,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     // MARK: - Calibration & Envelope Buffers
     private var baselineSamples: [Double] = []  // Samples captured during baseline calibration
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
-    private var smoothedEnvelope: Double = 0.0
+    private var envelopeBuffer: [Double] = []
     private var latestNormalized: Double = 0.0
     private let postCalibrationDelay: TimeInterval = 2.0
     private var stimulationAllowedAfter: Date = .distantFuture
@@ -150,7 +150,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     func recalibrate() {
         dynamicBaseline = -1.0
         warmupCount = 0
-        smoothedEnvelope = 0.0
+        envelopeBuffer.removeAll()
         emsLastIntensity = 0
         latestNormalized = 0.0
         DispatchQueue.main.async {
@@ -503,10 +503,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         // Take absolute value (rectify) the centered EMG.
         let absMV = abs(centeredMV)
 
-        // Asymmetric exponential envelope: faster decay than attack so signal drops quickly.
-        let envelopeAlpha = absMV > smoothedEnvelope ? 0.3 : 0.6
-        smoothedEnvelope = envelopeAlpha * absMV + (1 - envelopeAlpha) * smoothedEnvelope
-        let envelope = smoothedEnvelope
+        envelopeBuffer.append(absMV)
+        if envelopeBuffer.count > 20 { envelopeBuffer.removeFirst() }
+        let envelope = envelopeBuffer.reduce(0, +) / Double(envelopeBuffer.count)
 
         // During calibration, collect envelope samples for baseline or MVC computation.
         if calibrationMode == .baseline {
