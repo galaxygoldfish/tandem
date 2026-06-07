@@ -223,7 +223,7 @@ struct PatientSessionView: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     // Toggles reading string dynamically based on hardware activation loop
-                    Text(serialManager.isTensEnabled ? "Stimulation enabled" : "Stimulation disabled")
+                    Text(serialManager.isTensEnabled ? "Stimulation ON" : "Stimulation OFF")
                         .font(.custom("IBMPlexMono-Medium", size: 25))
                         .tracking(-1)
                         // Sets white for high contrast on active solid red, black for pale green frame
@@ -268,19 +268,31 @@ struct PatientSessionView: View {
                     Slider(
                         value: Binding(
                             get: { Double(serialManager.emsIntensity) },
-                            set: { serialManager.emsIntensity = Int($0) }
+                            set: { newValue in
+                                let stepped = Int(newValue)
+                                if stepped != serialManager.emsIntensity {
+                                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                                }
+                                serialManager.emsIntensity = stepped
+                            }
                         ),
                         in: 0...100,
                         step: 5,
                         label: { Text("Intensity") },
-                        minimumValueLabel: { Image(systemName: "bolt").padding(10) },
+                        minimumValueLabel: { Image(systemName: "bolt.slash.fill").padding(10) },
                         maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
                     )
                 } else {
                     Slider(
                         value: Binding(
                             get: { Double(serialManager.servoIntensity) },
-                            set: { serialManager.servoIntensity = Int($0) }
+                            set: { newValue in
+                                let stepped = Int(newValue)
+                                if stepped != serialManager.servoIntensity {
+                                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                                }
+                                serialManager.servoIntensity = stepped
+                            }
                         ),
                         in: 0...100,
                         step: 5,
@@ -304,7 +316,7 @@ struct PatientSessionView: View {
             }
             .padding(.horizontal, 22)
         }
-        .padding(.top, 15)
+        //.padding(.top, 15)
     }
 
     private var intensityCard: some View {

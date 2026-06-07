@@ -69,7 +69,7 @@ struct PatientView: View {
             PatientUnitStatusBadge()
                 .padding(20)
             Spacer()
-            Button(action: { step = .waiting }) {
+            Button(action: { step = serialManager.calibrationCompleted ? .session : .waiting }) {
                 Text("Continue")
                     .font(.custom("IBMPlexMono-Medium", size: 22))
                     .foregroundStyle(.white)

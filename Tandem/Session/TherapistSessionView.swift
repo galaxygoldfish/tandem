@@ -53,7 +53,7 @@ struct TherapistSessionView: View {
             
             tensOutputCard
                 .dimmedWhenStimOff(serialManager.isTensEnabled)
-            
+            Spacer()
             RepCounterCard(isEditable: true)
                 .padding(.horizontal, 20)
                 .dimmedWhenStimOff(serialManager.isTensEnabled)
@@ -108,7 +108,7 @@ struct TherapistSessionView: View {
                         Spacer()
                     }
                     .frame(width: available * 0.50)
-
+                    
                     // Right Column: Bio-feedback metrics tracking
                     VStack(spacing: 20) {
                         RepCounterCard(isEditable: true)
@@ -158,7 +158,7 @@ struct TherapistSessionView: View {
     /// Card 1: Green Patient Intent Tracking Channel
     private var emgFeedbackCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("EMG FEEDBACK (PATIENT INTENT)")
+            Text("Your muscle recording")
                 .font(.caption.monospaced().bold())
                 .foregroundStyle(.green.opacity(0.8))
             
@@ -195,7 +195,7 @@ struct TherapistSessionView: View {
     /// Card 2: Red Hardware Stimulation Channel
     private var tensOutputCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("TENS OUTPUT SIGNAL")
+            Text("Patient stimulation output")
                 .font(.caption.monospaced().bold())
                 .foregroundStyle(.red.opacity(0.9))
             
@@ -209,13 +209,6 @@ struct TherapistSessionView: View {
             .clipped()
             .animation(.linear(duration: 0.05), value: serialManager.tensPlotData)
             .id(serialManager.isTensConnected)
-
-            HStack {
-                Text(serialManager.isTensEnabled ? "Active Stimulation Pulse Engine" : "Stimulation Terminated")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
