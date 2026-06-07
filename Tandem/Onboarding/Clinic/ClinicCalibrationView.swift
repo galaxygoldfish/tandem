@@ -62,9 +62,9 @@ struct ClinicCalibrationView: View {
                 .opacity(baselineVisible ? 1 : 0)
                 .animation(.snappy(duration: 0.3, extraBounce: 0.35).delay(0.22), value: baselineVisible)
             Spacer()
-            TherapistUnitStatusBadge()
-                .padding(20)
-            Spacer()
+//            TherapistUnitStatusBadge()
+//                .padding(20)
+//            Spacer()
             CalibrationCaptureView(mode: .baseline) {
                 subStep = .mvc
             }

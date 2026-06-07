@@ -39,10 +39,6 @@ struct WelcomeView: View {
                 .background(Color.black, in: Capsule())
             }
             .buttonStyle(.plain)
-            Button("Debug: therapist session", action: onDebugPatientSession)
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

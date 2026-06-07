@@ -22,11 +22,6 @@ struct TherapistSessionView: View {
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
-                if !isTelehealth {
-                    recalibrateButton
-                        .disabled(!serialManager.isTensEnabled)
-                    abortButton
-                }
             }
         }
         .navigationTitle("Therapist")
@@ -62,6 +57,33 @@ struct TherapistSessionView: View {
             RepCounterCard(isEditable: true)
                 .padding(.horizontal, 20)
                 .dimmedWhenStimOff(serialManager.isTensEnabled)
+            Spacer()
+            Button(action: {
+                guard serialManager.isTensEnabled else { return }
+                serialManager.hardStop()
+            }) {
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        Text("ABORT")
+                            .font(.largeTitle.monospaced().bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                    Text("Spacebar")
+                        .font(.body)
+                        .opacity(0.5)
+                }
+                .padding(.vertical, 20)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(serialManager.isTensEnabled ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
+            .foregroundStyle(serialManager.isTensEnabled ? .white : .secondary)
+            .allowsHitTesting(serialManager.isTensEnabled)
+            .disabled(!serialManager.isTensEnabled)
+            .help("Abort session")
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .animation(.easeInOut(duration: 0.2), value: serialManager.isTensEnabled)
             
             Spacer()
         }
@@ -143,9 +165,7 @@ struct TherapistSessionView: View {
             WaveformView(
                 data: serialManager.plotData,
                 isRecording: serialManager.isRecording,
-                isConnected: serialManager.isConnected,
-                lineColor: .green,
-                showGridLines: false
+                isConnected: serialManager.isConnected
             )
             .frame(height: 120)
             .clipped()
@@ -156,7 +176,7 @@ struct TherapistSessionView: View {
                 Circle()
                     .fill(serialManager.isConnected ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
-                Text(serialManager.isConnected ? "Therapist Connected" : "Therapist Disconnected")
+                Text(serialManager.isConnected ? "Therapist unit connected" : "Therapist unit disconnected")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -183,8 +203,7 @@ struct TherapistSessionView: View {
                 data: serialManager.tensPlotData,
                 isRecording: serialManager.isRecording,
                 isConnected: serialManager.isTensConnected,
-                lineColor: .red,
-                showGridLines: false
+                tint: .red
             )
             .frame(height: 120)
             .clipped()

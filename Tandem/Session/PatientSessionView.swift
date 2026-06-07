@@ -82,8 +82,28 @@ struct PatientSessionView: View {
 
             Spacer()
 
-            TensWaveformCard(isCollapsed: $isWaveformCollapsed)
-                .dimmedWhenStimOff(serialManager.isTensEnabled)
+            Button(action: { serialManager.hardStop() }) {
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        Text("ABORT")
+                            .font(.largeTitle.monospaced().bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                    Text("Spacebar")
+                        .font(.body)
+                        .opacity(0.5)
+                }
+                .padding(.vertical, 20)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(serialManager.isTensEnabled ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
+            .foregroundStyle(serialManager.isTensEnabled ? .white : .secondary)
+            .disabled(!serialManager.isTensEnabled) // Hard stop is interactive only when stimulation runs
+            .help("Abort session")
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .animation(.easeInOut(duration: 0.2), value: serialManager.isTensEnabled)
 
             Spacer()
         }
