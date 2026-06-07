@@ -113,7 +113,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     // MARK: - OpenEMSstim
     /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
-    var useOpenEMSstim = false
+    var useOpenEMSstim = true
 
     private var emsReady = false
     private var emsLastIntensity = 0
@@ -484,7 +484,13 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         if dynamicBaseline < 0 { dynamicBaseline = value }
         warmupCount += 1
         let alpha = warmupCount < 500 ? baselineAlphaFast : baselineAlphaSlow
-        dynamicBaseline = (value * alpha) + (dynamicBaseline * (1 - alpha))
+        // Only update baseline when near rest so contractions don't push it up.
+        // Pre-calibration (baselineMV == nil) always update so warmup works normally.
+        let currentEnvelope = abs((value - dynamicBaseline) * toMillivolts)
+        let atRest = baselineMV == nil || currentEnvelope <= (baselineMV! * 2.0)
+        if atRest {
+            dynamicBaseline = (value * alpha) + (dynamicBaseline * (1 - alpha))
+        }
 
         if isPaused { return }
 
