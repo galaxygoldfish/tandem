@@ -92,13 +92,12 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let postCalibrationDelay: TimeInterval = 2.0
     private var stimulationAllowedAfter: Date = .distantFuture
     
-    /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
-    /// from the "Maximum stimulation strength" slider on the patient view.
-    @Published var maxServoDegrees: Int = 100
+    /// Intensity level (0–100) set by the slider. Mapped to servo degrees as intensity/100 × 180.
+    @Published var servoIntensity: Int = 50
 
     /// Upper bound (0…100) for openEMSstim intensity. Driven live from the
     /// "Maximum stimulation strength" slider when `useOpenEMSstim` is true.
-    @Published var emsMaxIntensity: Int = 50
+    @Published var emsIntensity: Int = 50
 
     // MARK: - Rep Counter
     @Published var repCount: Int = 0
@@ -327,11 +326,12 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    /// Build openEMSstim command — intensity tracks normalized EMG directly.
+    /// Build openEMSstim command — intensity and pulse width both scale with activation.
     private func emsCommand(for activation: Double) -> String? {
         let level = mapToTensLevel(activation)
-        let ceiling = max(0, min(emsMaxIntensity, 100))
+        let ceiling = max(0, min(emsIntensity, 100))
         let intensity = max(0, min(Int(level * Double(ceiling) + 0.5), ceiling))
+        print("[EMS] activation=\(String(format: "%.3f", activation))  level=\(String(format: "%.3f", level))  ceiling(slider)=\(ceiling)  intensity=\(intensity)  lastIntensity=\(emsLastIntensity)")
         if intensity == 0 && emsLastIntensity == 0 { return nil }
         emsLastIntensity = intensity
         return "C0I\(intensity)T\(emsPulseDurationMs)G"
@@ -363,7 +363,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 logStim("activation=\(pct)%  → off")
             }
         } else {
-            let degrees = Int(displayLevel * Double(maxServoDegrees))
+            let degrees = Int(displayLevel * Double(servoIntensity) / 100.0 * 180.0)
             let command = "\(degrees)\n"
             logStim("activation=\(Int((activation * 100).rounded()))%  → \(degrees)°")
             if let data = command.data(using: .utf8) {
@@ -418,7 +418,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                     guard let self, self.tensPort?.path == port.path else { return }
                     self.emsReady = true
                     self.isTensConnected = true
-                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(self.emsMaxIntensity), interval=\(self.sendInterval)s)")
+                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(self.emsIntensity), interval=\(self.sendInterval)s)")
                 }
             } else if path.contains("usb"), pendingBuffers[port.path] == nil {
                 port.baudRate = 115200
