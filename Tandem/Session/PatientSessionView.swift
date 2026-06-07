@@ -222,17 +222,33 @@ struct PatientSessionView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Slider(
-                value: Binding(
-                    get: { Double(serialManager.maxServoDegrees) },
-                    set: { serialManager.maxServoDegrees = Int($0) }
-                ),
-                in: 0...180,
-                step: 9,
-                label: { Text("Intensity") },
-                minimumValueLabel: { Image(systemName: "bolt").padding(10) },
-                maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
-            )
+            Group {
+                if serialManager.useOpenEMSstim {
+                    Slider(
+                        value: Binding(
+                            get: { Double(serialManager.emsMaxIntensity) },
+                            set: { serialManager.emsMaxIntensity = Int($0) }
+                        ),
+                        in: 0...100,
+                        step: 5,
+                        label: { Text("Intensity") },
+                        minimumValueLabel: { Image(systemName: "bolt").padding(10) },
+                        maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
+                    )
+                } else {
+                    Slider(
+                        value: Binding(
+                            get: { Double(serialManager.maxServoDegrees) },
+                            set: { serialManager.maxServoDegrees = Int($0) }
+                        ),
+                        in: 0...180,
+                        step: 9,
+                        label: { Text("Intensity") },
+                        minimumValueLabel: { Image(systemName: "bolt").padding(10) },
+                        maximumValueLabel: { Image(systemName: "bolt.fill").padding(10) }
+                    )
+                }
+            }
             .labelsHidden()
             .controlSize(.extraLarge)
             .padding(.top, 8)

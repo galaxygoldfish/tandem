@@ -94,8 +94,11 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     
     /// Upper bound (in servo degrees, 0…180) for the TENS command. Driven live
     /// from the "Maximum stimulation strength" slider on the patient view.
-    /// When `useOpenEMSstim` is true, this value is capped at 100 and used as the EMS intensity ceiling.
     @Published var maxServoDegrees: Int = 100
+
+    /// Upper bound (0…100) for openEMSstim intensity. Driven live from the
+    /// "Maximum stimulation strength" slider when `useOpenEMSstim` is true.
+    @Published var emsMaxIntensity: Int = 50
 
     // MARK: - Rep Counter
     @Published var repCount: Int = 0
@@ -117,7 +120,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let emsPulseDurationMs = 150
     private let sensoryThreshold = 0.3
 
-    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.5 }
+    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -327,7 +330,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Build openEMSstim command — intensity tracks normalized EMG directly.
     private func emsCommand(for activation: Double) -> String? {
         let level = mapToTensLevel(activation)
-        let ceiling = min(maxServoDegrees, 100)
+        let ceiling = max(0, min(emsMaxIntensity, 100))
         let intensity = max(0, min(Int(level * Double(ceiling) + 0.5), ceiling))
         if intensity == 0 && emsLastIntensity == 0 { return nil }
         emsLastIntensity = intensity
@@ -415,8 +418,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                     guard let self, self.tensPort?.path == port.path else { return }
                     self.emsReady = true
                     self.isTensConnected = true
-                    let ceiling = min(self.maxServoDegrees, 100)
-                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(ceiling), interval=\(self.sendInterval)s)")
+                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(self.emsMaxIntensity), interval=\(self.sendInterval)s)")
                 }
             } else if path.contains("usb"), pendingBuffers[port.path] == nil {
                 port.baudRate = 115200
