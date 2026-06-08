@@ -123,7 +123,6 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let emsWiperMin = 255
     private let emsWiperMaxStrong = 200
     private let emsWiperStepMax = 3
-    private let emsBootWaitS: TimeInterval = 12
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
@@ -480,12 +479,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 Logger.serial.info("Opening openEMSstim port: \(port.path)")
                 DispatchQueue.main.async {
                     self.logs.append(LogEntry(text: "OPENING EMS: \(port.path)"))
-                    self.logStim("EMS boot wait \(Int(self.emsBootWaitS))s…")
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + emsBootWaitS) { [weak self] in
-                    guard let self, self.tensPort?.path == port.path else { return }
-                    self.initializeEMS(port: port)
-                }
+                initializeEMS(port: port)
             } else if path.contains("usb"), pendingBuffers[port.path] == nil {
                 port.baudRate = 115200
                 port.delegate = self
