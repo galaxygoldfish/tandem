@@ -75,11 +75,9 @@ struct PatientSessionView: View {
                 .padding(.horizontal, 20)
             Spacer()
 
-            if !serialManager.useOpenEMSstim {
-                intensityCard
-                    .padding(.horizontal, 20)
-                    .dimmedWhenStimOff(serialManager.isTensEnabled)
-            }
+            intensityCard
+                .padding(.horizontal, 20)
+                .dimmedWhenStimOff(serialManager.isTensEnabled)
 
             Spacer()
 
@@ -132,10 +130,8 @@ struct PatientSessionView: View {
                     VStack(spacing: 20) {
                         enableStimulationCard
                         
-                        if !serialManager.useOpenEMSstim {
-                            configurationCard
-                                .dimmedWhenStimOff(serialManager.isTensEnabled) // Entire card disabled when off
-                        }
+                        configurationCard
+                            .dimmedWhenStimOff(serialManager.isTensEnabled) // Entire card disabled when off
                         
                         Spacer()
                     }

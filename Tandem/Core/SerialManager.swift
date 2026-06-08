@@ -116,7 +116,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     private var emsReady = false
     private var emsLastIntensity = 0
-    private let emsPulseDurationMs = 75
+    private let emsPulseDurationMs = 110
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
