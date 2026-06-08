@@ -112,11 +112,11 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     // MARK: - OpenEMSstim
     /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
-    @Published var useOpenEMSstim = false
+    @Published var useOpenEMSstim = true
 
     private var emsReady = false
     private var emsLastIntensity = 0
-    private let emsPulseDurationMs = 150
+    private let emsPulseDurationMs = 75
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
