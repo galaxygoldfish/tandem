@@ -93,7 +93,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Envelope used only for stimulation output — falls faster than the display envelope.
     private var stimulationEnvelope: Double = 0.0
     private let stimEnvAttack: Double = 0.3
-    private let stimEnvRelease: Double = 0.45
+    private let stimEnvRelease: Double = 0.85
     private let postCalibrationDelay: TimeInterval = 2.0
     private var stimulationAllowedAfter: Date = .distantFuture
     
@@ -128,11 +128,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let emsWiperMin = 255
     private let emsWiperMaxStrong = 220
     private let emsWiperRampUpStepMax = 5
-    private let emsWiperRampDownStepMax = 10
     private let sensoryThreshold = 0.3
-    private let emsReleaseThreshold = 0.25
+    private let emsReleaseThreshold = 0.29
 
-    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
+    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.03 : 0.25 }
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -383,19 +382,17 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         emsChannelActive = active
     }
 
-    /// Move wiper toward target; ramp down (weaker) is much faster than ramp up.
-    private func emsMoveWiper(toward target: Int, urgent: Bool = false) {
+    /// Move wiper toward target; weakening (q) is instant, strengthening (w) is rate-limited.
+    private func emsMoveWiper(toward target: Int) {
         guard emsReady else { return }
         let clamped = max(emsWiperMaxStrong, min(emsWiperMin, target))
         var current = emsCurrentWiper
         if clamped > current {
-            let limit = urgent ? (emsWiperMin - current) : emsWiperRampDownStepMax
-            let steps = min(clamped - current, limit)
+            let steps = clamped - current
             for _ in 0..<steps { emsSendByte(UInt8(ascii: "q")) }
             current += steps
         } else if clamped < current {
-            let limit = urgent ? (current - emsWiperMaxStrong) : emsWiperRampUpStepMax
-            let steps = min(current - clamped, limit)
+            let steps = min(current - clamped, emsWiperRampUpStepMax)
             for _ in 0..<steps { emsSendByte(UInt8(ascii: "w")) }
             current -= steps
         }
@@ -411,7 +408,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         if synchronous {
             for _ in 0..<stepsNeeded { emsSendByte(UInt8(ascii: "q")) }
         } else {
-            emsMoveWiper(toward: emsWiperMin, urgent: true)
+            emsMoveWiper(toward: emsWiperMin)
             return
         }
         emsCurrentWiper = emsWiperMin
@@ -466,7 +463,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 logStim("activation=\(pct)%  wiper=\(emsCurrentWiper) → \(targetWiper)")
             } else {
                 emsSetChannelActive(false)
-                emsMoveWiper(toward: emsWiperMin, urgent: true)
+                emsMoveWiper(toward: emsWiperMin)
                 logStim("activation=\(pct)%  → off (wiper=\(emsCurrentWiper))")
             }
         } else {
