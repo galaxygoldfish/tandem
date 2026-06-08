@@ -46,14 +46,16 @@ struct ExerciseSelectionView: View {
             Exercise.allCases.first { $0.wireKey == key }
         }
 
-        /// Asset Catalog image shown on the patient's electrode-placement screen.
-        /// Falls back to the bicep image for exercises that don't yet have their
-        /// own placement asset — swap these in as the artwork lands.
-        var electrodeImageName: String {
+        /// Asset Catalog image shown on the patient's placement screen — this
+        /// is the TENS / stimulation electrode placement (what the patient
+        /// sticks on themselves), distinct from the therapist-side EMG sensor
+        /// placement. Falls back to the bicep image for exercises that don't
+        /// yet have their own placement asset — swap these in as artwork lands.
+        var patientElectrodeImageName: String {
             switch self {
-            case .bicepCurl:    return "BicepEMGElectrode"
-            case .shoulderShrug: return "BicepEMGElectrode"
-            case .wristFlex:    return "BicepEMGElectrode"
+            case .bicepCurl:    return "BicepTENSElectrode"
+            case .shoulderShrug: return "BicepTENSElectrode"
+            case .wristFlex:    return "BicepTENSElectrode"
             }
         }
 

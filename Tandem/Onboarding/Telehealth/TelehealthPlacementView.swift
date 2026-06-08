@@ -21,7 +21,7 @@ struct TelehealthPlacementView: View {
                 .foregroundStyle(.black.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            Image(exercise.electrodeImageName)
+            Image(exercise.patientElectrodeImageName)
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: 580, maxHeight: 460)
@@ -40,7 +40,7 @@ struct TelehealthPlacementView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .overlay(alignment: .bottomLeading) {
-            TherapistUnitStatusBadge()
+            PatientUnitStatusBadge()
                 .padding(30)
         }
     }

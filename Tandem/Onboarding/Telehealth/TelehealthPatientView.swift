@@ -21,6 +21,11 @@ struct TelehealthPatientView: View {
     /// Once the patient taps Continue on the placement screen we don't bounce
     /// them back to it if the therapist re-broadcasts the same exercise.
     @State private var placementAcknowledged = false
+    /// Latched once the therapist's CALIBRATED message arrives. The patient
+    /// only actually enters the session when *both* this is true *and* they've
+    /// tapped Continue on the placement screen — calibration alone doesn't
+    /// auto-skip the placement screen.
+    @State private var calibrationReceived = false
     
     var body: some View {
         Group {
@@ -34,8 +39,15 @@ struct TelehealthPatientView: View {
                     exercise: exercise,
                     onContinue: {
                         placementAcknowledged = true
-                        withAnimation(.onboardingSpring) {
-                            step = .waiting
+                        if calibrationReceived {
+                            serialManager.calibrationCompleted = true
+                            withAnimation(.onboardingSpring) {
+                                step = .session
+                            }
+                        } else {
+                            withAnimation(.onboardingSpring) {
+                                step = .waiting
+                            }
                         }
                     }
                 )
@@ -59,6 +71,7 @@ struct TelehealthPatientView: View {
                     step = .connect
                     showSuccess = false
                     placementAcknowledged = false
+                    calibrationReceived = false
                 default: break
                 }
             }
@@ -210,6 +223,11 @@ struct TelehealthPatientView: View {
             serialManager.receiveRemoteActivation(value)
         }
         networkManager.onCalibrationReceived = {
+            calibrationReceived = true
+            // If the patient is still on the placement screen, don't auto-skip
+            // them past it — wait for them to tap Continue. They might still be
+            // sticking on electrodes.
+            if case .placement = step { return }
             serialManager.calibrationCompleted = true
             withAnimation(.onboardingSpring) {
                 step = .session
@@ -280,6 +298,7 @@ struct TelehealthPatientView: View {
                 Button {
                     networkManager.stopReceiver()
                     placementAcknowledged = false
+                    calibrationReceived = false
                     step = .connect
                 } label: {
                     Text("Disconnect")
