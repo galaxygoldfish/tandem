@@ -112,7 +112,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     // MARK: - OpenEMSstim
     /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
-    var useOpenEMSstim = false
+    @Published var useOpenEMSstim = false
 
     private var emsReady = false
     private var emsLastIntensity = 0

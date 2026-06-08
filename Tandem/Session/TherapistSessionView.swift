@@ -6,6 +6,7 @@ import SwiftUI
 struct TherapistSessionView: View {
     @EnvironmentObject var serialManager: SerialManager
     @State private var isConsoleMinimized = true
+    @State private var isStimulationSettingsPresented = false
     @Environment(\.openWindow) private var openWindow
 
     var isTelehealth: Bool = false
@@ -22,7 +23,17 @@ struct TherapistSessionView: View {
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
+                Button {
+                    isStimulationSettingsPresented = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Stimulation settings")
             }
+        }
+        .sheet(isPresented: $isStimulationSettingsPresented) {
+            StimulationMethodSheet(isPresented: $isStimulationSettingsPresented)
+                .environmentObject(serialManager)
         }
         .navigationTitle("Therapist")
         .navigationSubtitle(connectionSubtitle)
