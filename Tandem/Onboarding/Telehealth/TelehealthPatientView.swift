@@ -5,7 +5,12 @@ struct TelehealthPatientView: View {
     @EnvironmentObject var networkManager: NetworkManager
     var onBack: () -> Void
     
-    enum Step { case connect, waiting, session }
+    enum Step: Equatable {
+        case connect
+        case waiting
+        case placement(ExerciseSelectionView.Exercise)
+        case session
+    }
     @State private var step: Step = .connect
     @State private var connectingDisplay: String = ""
     @State private var showSuccess = false
@@ -13,6 +18,9 @@ struct TelehealthPatientView: View {
     @State private var ipInput = ""
     @State private var contentVisible = false
     @State private var waitingVisible = false
+    /// Once the patient taps Continue on the placement screen we don't bounce
+    /// them back to it if the therapist re-broadcasts the same exercise.
+    @State private var placementAcknowledged = false
     
     var body: some View {
         Group {
@@ -21,6 +29,17 @@ struct TelehealthPatientView: View {
                 connectBody.transition(.onboardingStep)
             case .waiting:
                 waitingBody.transition(.onboardingStep)
+            case .placement(let exercise):
+                TelehealthPlacementView(
+                    exercise: exercise,
+                    onContinue: {
+                        placementAcknowledged = true
+                        withAnimation(.onboardingSpring) {
+                            step = .waiting
+                        }
+                    }
+                )
+                .transition(.onboardingStep)
             case .session:
                 PatientSessionView(isTelehealth: true).transition(.onboardingStep)
             }
@@ -34,9 +53,14 @@ struct TelehealthPatientView: View {
                     showSuccess = false
                 }
             }
-            if !connected && step == .waiting {
-                step = .connect
-                showSuccess = false
+            if !connected {
+                switch step {
+                case .waiting, .placement:
+                    step = .connect
+                    showSuccess = false
+                    placementAcknowledged = false
+                default: break
+                }
             }
         }
     }
@@ -197,6 +221,12 @@ struct TelehealthPatientView: View {
         networkManager.onTargetRepsReceived = { count in
             serialManager.targetReps = count
         }
+        networkManager.onExerciseReceived = { exercise in
+            guard !placementAcknowledged, step == .waiting else { return }
+            withAnimation(.onboardingSpring) {
+                step = .placement(exercise)
+            }
+        }
     }
     
     @ViewBuilder
@@ -249,6 +279,7 @@ struct TelehealthPatientView: View {
                 Spacer()
                 Button {
                     networkManager.stopReceiver()
+                    placementAcknowledged = false
                     step = .connect
                 } label: {
                     Text("Disconnect")

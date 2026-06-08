@@ -30,6 +30,41 @@ struct ExerciseSelectionView: View {
             case .wristFlex:    return "hand.raised"
             }
         }
+
+        /// Stable identifier used over the Tandem wire protocol so the patient
+        /// Mac can decode which exercise the therapist selected. Kept separate
+        /// from `rawValue` because rawValue may contain spaces / be localized.
+        var wireKey: String {
+            switch self {
+            case .bicepCurl:    return "bicepCurl"
+            case .shoulderShrug: return "shoulderShrug"
+            case .wristFlex:    return "wristFlex"
+            }
+        }
+
+        static func fromWireKey(_ key: String) -> Exercise? {
+            Exercise.allCases.first { $0.wireKey == key }
+        }
+
+        /// Asset Catalog image shown on the patient's electrode-placement screen.
+        /// Falls back to the bicep image for exercises that don't yet have their
+        /// own placement asset — swap these in as the artwork lands.
+        var electrodeImageName: String {
+            switch self {
+            case .bicepCurl:    return "BicepEMGElectrode"
+            case .shoulderShrug: return "BicepEMGElectrode"
+            case .wristFlex:    return "BicepEMGElectrode"
+            }
+        }
+
+        /// Body part name used inline in the placement instructions copy.
+        var bodyPart: String {
+            switch self {
+            case .bicepCurl:    return "bicep"
+            case .shoulderShrug: return "shoulder"
+            case .wristFlex:    return "wrist"
+            }
+        }
     }
 
     var body: some View {

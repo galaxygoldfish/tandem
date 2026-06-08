@@ -52,6 +52,12 @@ class NetworkManager: ObservableObject {
     var onRepCountReceived: ((Int) -> Void)?
     /// Called on main thread when the therapist updates the target reps (receiver mode).
     var onTargetRepsReceived: ((Int) -> Void)?
+    /// Called on main thread when the therapist announces which exercise was selected (receiver mode).
+    var onExerciseReceived: ((ExerciseSelectionView.Exercise) -> Void)?
+
+    /// Cached so we can re-broadcast to receivers that join after the therapist
+    /// has already picked an exercise (sender mode only).
+    private var currentExercise: ExerciseSelectionView.Exercise?
 
     private var listener: NWListener?
     private var senderConnections: [NWConnection] = []
@@ -118,6 +124,11 @@ class NetworkManager: ObservableObject {
                 self?.senderConnections.append(conn)
                 self?.isConnected = true
                 self?.connectionStatus = "Receiver connected"
+                // Re-broadcast the current exercise so a late-joining patient
+                // still gets the placement screen for the right body part.
+                if let exercise = self?.currentExercise {
+                    self?.sendExercise(exercise)
+                }
             }
         }
 
@@ -137,6 +148,7 @@ class NetworkManager: ObservableObject {
         listener = nil
         senderConnections.forEach { $0.cancel() }
         senderConnections.removeAll()
+        currentExercise = nil
         wirelessMode = .none
         isConnected = false
         connectionStatus = "Not connected"
@@ -158,6 +170,16 @@ class NetworkManager: ObservableObject {
 
     func sendTargetReps(_ count: Int) {
         guard let data = "TARGET:\(count)\n".data(using: .utf8) else { return }
+        for conn in senderConnections {
+            conn.send(content: data, completion: .idempotent)
+        }
+    }
+
+    /// Broadcasts the selected exercise to every connected patient. Also caches
+    /// the value so any patient that connects later receives the same exercise.
+    func sendExercise(_ exercise: ExerciseSelectionView.Exercise) {
+        currentExercise = exercise
+        guard let data = "EXERCISE:\(exercise.wireKey)\n".data(using: .utf8) else { return }
         for conn in senderConnections {
             conn.send(content: data, completion: .idempotent)
         }
@@ -385,6 +407,9 @@ class NetworkManager: ObservableObject {
                         DispatchQueue.main.async { self.onRepCountReceived?(count) }
                     } else if clean.hasPrefix("TARGET:"), let count = Int(clean.dropFirst(7)) {
                         DispatchQueue.main.async { self.onTargetRepsReceived?(count) }
+                    } else if clean.hasPrefix("EXERCISE:"),
+                              let exercise = ExerciseSelectionView.Exercise.fromWireKey(String(clean.dropFirst(9))) {
+                        DispatchQueue.main.async { self.onExerciseReceived?(exercise) }
                     } else if let value = Double(clean) {
                         DispatchQueue.main.async { self.onActivationReceived?(value) }
                     }

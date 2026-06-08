@@ -70,7 +70,7 @@ struct TherapistView: View {
     private var placementBody: some View {
         Group {
             if isTelehealth {
-                TelehealthPlacementView(onContinue: { step = .calibration })
+                TelehealthPlacementView(exercise: .bicepCurl, onContinue: { step = .calibration })
             } else {
                 ClinicPlacementView(onContinue: { step = .calibration })
             }

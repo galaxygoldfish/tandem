@@ -180,6 +180,7 @@ struct TandemApp: App {
                     onBack: { flow = .telehealthExerciseSelect }
                 )
                 .transition(.onboardingStep)
+                .onAppear { networkManager.sendExercise(exercise) }
             case .telehealthPatient:
                 TelehealthPatientView(onBack: { flow = .telehealthPatientConnect })
                     .transition(.onboardingStep)

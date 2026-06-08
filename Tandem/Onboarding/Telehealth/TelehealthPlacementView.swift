@@ -6,22 +6,22 @@ import SwiftUI
 /// Layout however you like — the `onContinue` callback advances the parent's
 /// flow into calibration.
 struct TelehealthPlacementView: View {
+    var exercise: ExerciseSelectionView.Exercise
     var onContinue: () -> Void
 
     var body: some View {
-        // TODO: design the telehealth placement screen here.
         VStack(spacing: 24) {
             Spacer()
             Text("Place your electrodes")
                 .font(.custom("IBMPlexMono-Medium", size: 40))
                 .tracking(-1)
                 .multilineTextAlignment(.center)
-            Text("Place the electrodes on your bicep as shown, then press continue")
+            Text("Place the electrodes on your \(exercise.bodyPart) as shown, then press continue")
                 .font(.custom("IBMPlexMono-Regular", size: 18))
                 .foregroundStyle(.black.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            Image("BicepEMGElectrode")
+            Image(exercise.electrodeImageName)
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: 580, maxHeight: 460)
