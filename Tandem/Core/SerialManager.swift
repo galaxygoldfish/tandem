@@ -20,7 +20,8 @@ struct LogEntry: Identifiable {
 /// 4. Baseline & MVC calibration (user-specific normalization)
 /// 5. Normalized strength [0, 1]
 /// 6. Nonlinear mapping to TENS output level
-/// 7. Send TENS commands at ~100 ms intervals
+/// 7. Send stimulation commands at ~100 ms intervals
+///    (openEMSstim: test-mode wiper q/w + channel toggle; motor: degrees)
 ///
 class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
@@ -95,8 +96,8 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     /// Intensity level (0–100) set by the slider. Mapped to servo degrees as intensity/100 × 180.
     @Published var servoIntensity: Int = 50
 
-    /// Upper bound (0…100) for openEMSstim intensity. Driven live from the
-    /// "Maximum stimulation strength" slider when `useOpenEMSstim` is true.
+    /// Upper bound (0…100) for openEMSstim intensity. Scales how far the wiper
+    /// moves toward the strong end (200); 100% = full perceptible range.
     @Published var emsIntensity: Int = 50
 
     // MARK: - Rep Counter
@@ -110,13 +111,19 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private let repThreshold: Double = 0.65
     private let repResetThreshold: Double = 0.40
 
-    // MARK: - OpenEMSstim
+    // MARK: - OpenEMSstim (test-mode wiper commands: q/weaker, w/stronger, 1/toggle ch1)
     /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
     @Published var useOpenEMSstim = true
 
     private var emsReady = false
-    private var emsLastIntensity = 0
-    private let emsPulseDurationMs = 110
+    private var emsInitialized = false
+    private var emsCurrentWiper = 255
+    private var emsChannelActive = false
+    /// Wiper 255 = minimum perceptible; lower values = stronger (200 ≈ max safe).
+    private let emsWiperMin = 255
+    private let emsWiperMaxStrong = 200
+    private let emsWiperStepMax = 3
+    private let emsBootWaitS: TimeInterval = 12
     private let sensoryThreshold = 0.3
 
     private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
@@ -150,7 +157,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
-        emsLastIntensity = 0
+        emsCurrentWiper = emsWiperMin
         latestNormalized = 0.0
         DispatchQueue.main.async {
             self.logs.append(LogEntry(text: "RECALIBRATED BASELINE"))
@@ -308,14 +315,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         latestNormalized = 0.0
         normalizedStrength = 0.0
         tensOutput = 0.0
-        emsLastIntensity = 0
-        // Send the zero command synchronously on the port, bypassing the
-        // periodic throttle in processNewValue / receiveRemoteActivation.
+        // Park output synchronously, bypassing the periodic throttle.
         if useOpenEMSstim {
-            let zero = "C0I0T\(emsPulseDurationMs)G"
-            if let data = zero.data(using: .utf8) {
-                for _ in 0..<3 { tensPort?.send(data) }
-            }
+            emsParkOutput(synchronous: true)
         } else {
             let zero = "0\n".data(using: .utf8) ?? Data()
             for _ in 0..<3 { tensPort?.send(zero) }
@@ -326,25 +328,84 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    /// Build openEMSstim command — intensity and pulse width both scale with activation.
-    private func emsCommand(for activation: Double) -> String? {
-        let level = mapToTensLevel(activation)
-        let ceiling = max(0, min(emsIntensity, 100))
-        let intensity = max(0, min(Int(level * Double(ceiling) + 0.5), ceiling))
-        print("[EMS] activation=\(String(format: "%.3f", activation))  level=\(String(format: "%.3f", level))  ceiling(slider)=\(ceiling)  intensity=\(intensity)  lastIntensity=\(emsLastIntensity)")
-        if intensity == 0 && emsLastIntensity == 0 { return nil }
-        emsLastIntensity = intensity
-        return "C0I\(intensity)T\(emsPulseDurationMs)G"
+    /// Map normalized activation to wiper position: 30% threshold → 255, 100% → 200.
+    private func emsTargetWiper(for activation: Double) -> Int {
+        guard activation >= sensoryThreshold else { return emsWiperMin }
+        let span = 1.0 - sensoryThreshold
+        let t = max(0.0, min(1.0, (activation - sensoryThreshold) / span))
+        let maxStrength = Double(max(0, min(emsIntensity, 100))) / 100.0
+        let range = Double(emsWiperMin - emsWiperMaxStrong)
+        return emsWiperMin - Int(t * maxStrength * range + 0.5)
+    }
+
+    private func emsSendByte(_ byte: UInt8) {
+        tensPort?.send(Data([byte]))
+    }
+
+    private func emsSetChannelActive(_ active: Bool) {
+        guard active != emsChannelActive, emsReady else { return }
+        emsSendByte(UInt8(ascii: "1"))
+        emsChannelActive = active
+    }
+
+    /// Move wiper toward target, rate-limited to `emsWiperStepMax` steps per tick.
+    private func emsMoveWiper(toward target: Int) {
+        guard emsReady else { return }
+        let clamped = max(emsWiperMaxStrong, min(emsWiperMin, target))
+        var current = emsCurrentWiper
+        if clamped < current {
+            let steps = min(current - clamped, emsWiperStepMax)
+            for _ in 0..<steps { emsSendByte(UInt8(ascii: "w")) }
+            current -= steps
+        } else if clamped > current {
+            let steps = min(clamped - current, emsWiperStepMax)
+            for _ in 0..<steps { emsSendByte(UInt8(ascii: "q")) }
+            current += steps
+        }
+        emsCurrentWiper = current
+    }
+
+    /// Return wiper to minimum and turn channel off (safe state).
+    private func emsParkOutput(synchronous: Bool = false) {
+        guard emsReady else { return }
+        emsSetChannelActive(false)
+        let stepsNeeded = emsWiperMin - emsCurrentWiper
+        guard stepsNeeded > 0 else { return }
+        if synchronous {
+            for _ in 0..<stepsNeeded { emsSendByte(UInt8(ascii: "q")) }
+        } else {
+            emsMoveWiper(toward: emsWiperMin)
+            return
+        }
+        emsCurrentWiper = emsWiperMin
+    }
+
+    /// Reset wiper to 255 after board boot (matches ems_ramp_test.py init).
+    private func initializeEMS(port: ORSSerialPort) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            for _ in 0..<255 {
+                port.send(Data([UInt8(ascii: "q")]))
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            DispatchQueue.main.async {
+                guard self.tensPort?.path == port.path else { return }
+                self.emsCurrentWiper = self.emsWiperMin
+                self.emsChannelActive = false
+                self.emsInitialized = true
+                self.emsReady = true
+                self.logStim("EMS ready (wiper=\(self.emsWiperMin), channel off, max slider=\(self.emsIntensity)%)")
+            }
+        }
     }
 
     /// Send zero / park output when entering calibration.
     private func parkTensOutput() {
         latestNormalized = 0.0
-        emsLastIntensity = 0
         guard isTensConnected else { return }
-        if useOpenEMSstim, emsReady, let data = "C0I0T\(emsPulseDurationMs)G".data(using: .utf8) {
-            tensPort?.send(data)
-        } else if !useOpenEMSstim, let data = "0\n".data(using: .utf8) {
+        if useOpenEMSstim {
+            emsParkOutput()
+        } else if let data = "0\n".data(using: .utf8) {
             tensPort?.send(data)
         }
     }
@@ -353,14 +414,17 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private func sendStimulationOutput(activation: Double, displayLevel: Double) {
         guard isTensConnected, tensOutputAllowed else { return }
         if useOpenEMSstim {
-            guard emsReady else { return }
+            guard emsReady, emsInitialized else { return }
             let pct = Int((activation * 100).rounded())
-            let command = emsCommand(for: activation)
-            if let command, let data = command.data(using: .utf8) {
-                logStim("activation=\(pct)%  I=\(emsLastIntensity)  → \(command)")
-                tensPort?.send(data)
+            let targetWiper = emsTargetWiper(for: activation)
+            if activation >= sensoryThreshold {
+                emsSetChannelActive(true)
+                emsMoveWiper(toward: targetWiper)
+                logStim("activation=\(pct)%  wiper=\(emsCurrentWiper) → \(targetWiper)")
             } else {
-                logStim("activation=\(pct)%  → off")
+                emsSetChannelActive(false)
+                emsMoveWiper(toward: emsWiperMin)
+                logStim("activation=\(pct)%  → off (wiper=\(emsCurrentWiper))")
             }
         } else {
             let degrees = Int(displayLevel * Double(servoIntensity) / 100.0 * 180.0)
@@ -409,16 +473,18 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 portRoles[path] = .tens
                 tensPort = port
                 emsReady = false
-                isTensConnected = false
+                emsInitialized = false
+                emsCurrentWiper = emsWiperMin
+                emsChannelActive = false
+                isTensConnected = true
                 Logger.serial.info("Opening openEMSstim port: \(port.path)")
                 DispatchQueue.main.async {
                     self.logs.append(LogEntry(text: "OPENING EMS: \(port.path)"))
+                    self.logStim("EMS boot wait \(Int(self.emsBootWaitS))s…")
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + emsBootWaitS) { [weak self] in
                     guard let self, self.tensPort?.path == port.path else { return }
-                    self.emsReady = true
-                    self.isTensConnected = true
-                    self.logStim("EMS CONNECTED: \(port.path) (ceiling=\(self.emsIntensity), interval=\(self.sendInterval)s)")
+                    self.initializeEMS(port: port)
                 }
             } else if path.contains("usb"), pendingBuffers[port.path] == nil {
                 port.baudRate = 115200
@@ -724,6 +790,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
                 self.isTensConnected = false
                 self.tensPort = nil
                 self.emsReady = false
+                self.emsInitialized = false
+                self.emsCurrentWiper = self.emsWiperMin
+                self.emsChannelActive = false
                 self.logs.append(LogEntry(text: "TENS DISCONNECTED: \(port.path)"))
             case .none:
                 self.logs.append(LogEntry(text: "PORT REMOVED (unidentified): \(port.path)"))
