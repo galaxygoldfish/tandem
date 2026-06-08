@@ -90,10 +90,6 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var mvcSamples: [Double] = []  // Samples captured during MVC calibration
     private var envelopeBuffer: [Double] = []
     private var latestNormalized: Double = 0.0
-    /// Envelope used only for stimulation output — falls faster than the display envelope.
-    private var stimulationEnvelope: Double = 0.0
-    private let stimEnvAttack: Double = 0.3
-    private let stimEnvRelease: Double = 0.95
     private let postCalibrationDelay: TimeInterval = 2.0
     private var stimulationAllowedAfter: Date = .distantFuture
     
@@ -123,19 +119,14 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var emsInitialized = false
     private var emsCurrentWiper = 255
     private var emsChannelActive = false
-    private var emsStimLatch = false
-    private var emsLatchOnSince: Date?
-    /// Wiper 255 = minimum perceptible; lower values = stronger (220 ≈ max safe).
+    private var emsStimActive = false
     private let emsWiperMin = 255
     private let emsWiperMaxStrong = 220
-    private let emsWiperRampUpStepMax = 5
+    private let emsWiperStepMax = 4
     private let sensoryThreshold = 0.3
-    /// Fast activation must drop below this to end a flex (stable signal used to start).
-    private let emsFastReleaseThreshold = 0.35
-    private let emsMinStimHoldS: TimeInterval = 0.10
+    private let emsReleaseThreshold = 0.20
 
-    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.03 : 0.25 }
-    private let sendIntervalRelease: TimeInterval = 0.01
+    private var sendInterval: TimeInterval { useOpenEMSstim ? 0.1 : 0.25 }
 
     /// Calibration mode enum: tracks whether we're capturing baseline or MVC.
     enum CalibrationMode {
@@ -166,9 +157,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         dynamicBaseline = -1.0
         warmupCount = 0
         envelopeBuffer.removeAll()
-        stimulationEnvelope = 0.0
-        emsStimLatch = false
-        emsLatchOnSince = nil
+        emsStimActive = false
         emsCurrentWiper = emsWiperMin
         latestNormalized = 0.0
         DispatchQueue.main.async {
@@ -327,9 +316,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         latestNormalized = 0.0
         normalizedStrength = 0.0
         tensOutput = 0.0
-        stimulationEnvelope = 0.0
-        emsStimLatch = false
-        emsLatchOnSince = nil
+        emsStimActive = false
         // Park output synchronously, bypassing the periodic throttle.
         if useOpenEMSstim {
             emsParkOutput(synchronous: true)
@@ -343,45 +330,31 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    /// Normalized activation for stimulation — fast attack, faster release than the display envelope.
-    private func normalizedForStimulation(_ absMV: Double) -> Double {
-        if absMV > stimulationEnvelope {
-            stimulationEnvelope += stimEnvAttack * (absMV - stimulationEnvelope)
-        } else {
-            stimulationEnvelope += stimEnvRelease * (absMV - stimulationEnvelope)
-        }
-        return computeNormalizedStrength(stimulationEnvelope)
-    }
-
-    /// Turn on from stable EMG (avoids false starts); turn off from fast EMG (drops quickly on release).
-    private func updateEmsStimLatch(stableActivation: Double, fastActivation: Double) -> Bool {
+    /// Latched flex detection: on ≥30%, off <20%. Channel toggles only on these transitions.
+    private func updateEmsActive(_ activation: Double) -> Bool {
         guard emsIntensity > 0 else {
-            emsStimLatch = false
-            emsLatchOnSince = nil
+            emsStimActive = false
             return false
         }
-        if !emsStimLatch {
-            if stableActivation >= sensoryThreshold {
-                emsStimLatch = true
-                emsLatchOnSince = Date()
-            }
-        } else {
-            let heldLongEnough = emsLatchOnSince.map {
-                Date().timeIntervalSince($0) >= emsMinStimHoldS
-            } ?? true
-            if heldLongEnough && fastActivation < emsFastReleaseThreshold {
-                emsStimLatch = false
-                emsLatchOnSince = nil
-                stimulationEnvelope = 0.0
-            }
+        if activation >= sensoryThreshold {
+            emsStimActive = true
+        } else if activation < emsReleaseThreshold {
+            emsStimActive = false
         }
-        return emsStimLatch
+        return emsStimActive
     }
 
-    /// Map normalized activation to wiper position: 30% threshold → 255, 100% → 220.
-    /// Slider at 0 = no stimulation (channel stays off).
+    /// Send `1` only when channel state actually changes (once per flex start/end).
+    private func syncEmsChannel(to active: Bool) {
+        guard active != emsChannelActive, emsReady else { return }
+        emsSendByte(UInt8(ascii: "1"))
+        emsChannelActive = active
+        logStim(active ? "channel ON" : "channel OFF")
+    }
+
+    /// Map therapist activation → wiper: 30% → 255 (min), 100% → 220 (max, scaled by slider).
     private func emsTargetWiper(for activation: Double) -> Int {
-        guard emsIntensity > 0, activation >= sensoryThreshold else { return emsWiperMin }
+        guard emsIntensity > 0 else { return emsWiperMin }
         let span = 1.0 - sensoryThreshold
         let t = max(0.0, min(1.0, (activation - sensoryThreshold) / span))
         let maxStrength = Double(max(0, min(emsIntensity, 100))) / 100.0
@@ -394,22 +367,21 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     }
 
     private func emsSetChannelActive(_ active: Bool) {
-        guard active != emsChannelActive, emsReady else { return }
-        emsSendByte(UInt8(ascii: "1"))
-        emsChannelActive = active
+        syncEmsChannel(to: active)
     }
 
-    /// Move wiper toward target; weakening (q) is instant, strengthening (w) is rate-limited.
+    /// Rate-limited wiper move — smooth in both directions, no instant jumps.
     private func emsMoveWiper(toward target: Int) {
         guard emsReady else { return }
         let clamped = max(emsWiperMaxStrong, min(emsWiperMin, target))
+        guard clamped != emsCurrentWiper else { return }
         var current = emsCurrentWiper
         if clamped > current {
-            let steps = clamped - current
+            let steps = min(clamped - current, emsWiperStepMax)
             for _ in 0..<steps { emsSendByte(UInt8(ascii: "q")) }
             current += steps
-        } else if clamped < current {
-            let steps = min(current - clamped, emsWiperRampUpStepMax)
+        } else {
+            let steps = min(current - clamped, emsWiperStepMax)
             for _ in 0..<steps { emsSendByte(UInt8(ascii: "w")) }
             current -= steps
         }
@@ -462,26 +434,22 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     }
 
     /// Route normalized activation to motor or openEMSstim output.
-    /// `stableActivation` gates channel on; `activation` (fast) gates channel off and wiper level.
-    private func sendStimulationOutput(
-        activation: Double,
-        displayLevel: Double,
-        stableActivation: Double? = nil
-    ) {
+    private func sendStimulationOutput(activation: Double, displayLevel: Double) {
         guard isTensConnected, tensOutputAllowed else { return }
         if useOpenEMSstim {
             guard emsReady, emsInitialized else { return }
-            let stable = stableActivation ?? activation
             let pct = Int((activation * 100).rounded())
-            let targetWiper = emsTargetWiper(for: activation)
-            if updateEmsStimLatch(stableActivation: stable, fastActivation: activation) {
-                emsSetChannelActive(true)
-                emsMoveWiper(toward: targetWiper)
-                logStim("activation=\(pct)%  wiper=\(emsCurrentWiper) → \(targetWiper)")
+            let wasActive = emsStimActive
+            let active = updateEmsActive(activation)
+            if active != wasActive {
+                syncEmsChannel(to: active)
+            }
+            if active {
+                let target = emsTargetWiper(for: activation)
+                emsMoveWiper(toward: target)
+                logStim("activation=\(pct)%  wiper=\(emsCurrentWiper) → \(target)")
             } else {
-                emsSetChannelActive(false)
                 emsMoveWiper(toward: emsWiperMin)
-                logStim("activation=\(pct)%  → off (wiper=\(emsCurrentWiper))")
             }
         } else {
             let degrees = Int(displayLevel * Double(servoIntensity) / 100.0 * 180.0)
@@ -638,30 +606,20 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         smoothedValue = (amplified * signalSmoothing) + (smoothedValue * (1 - signalSmoothing))
         
         let normalized = computeNormalizedStrength(envelope)
-        let activationForOutput = normalizedForStimulation(absMV)
-        latestNormalized = activationForOutput
+        latestNormalized = normalized
         let tensLevel = mapToTensLevel(normalized)
-        let tensLevelForOutput = mapToTensLevel(activationForOutput)
 
         if isRecording, let start = recordingStartTime {
             let ms = Int64(Date().timeIntervalSince(start) * 1000)
             recordedData.append((timestamp: ms, signal: absMV, normalized: normalized, tens: tensLevel))
         }
 
-        if isTensEnabled, tensOutputAllowed {
-            let releasing = emsStimLatch && activationForOutput < emsFastReleaseThreshold + 0.08
-            let interval = releasing ? sendIntervalRelease : sendInterval
-            if Date().timeIntervalSince(lastTensSent) > interval {
-                lastTensSent = Date()
-                sendStimulationOutput(
-                    activation: activationForOutput,
-                    displayLevel: tensLevelForOutput,
-                    stableActivation: normalized
-                )
-                networkManager?.sendActivation(activationForOutput)
-                if calibrationMode == .none {
-                    checkRep(latestNormalized)
-                }
+        if isTensEnabled, tensOutputAllowed, Date().timeIntervalSince(lastTensSent) > sendInterval {
+            lastTensSent = Date()
+            sendStimulationOutput(activation: normalized, displayLevel: tensLevel)
+            networkManager?.sendActivation(normalized)
+            if calibrationMode == .none {
+                checkRep(normalized)
             }
         }
 
