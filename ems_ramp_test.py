@@ -210,10 +210,9 @@ import serial
 EMS_BAUD = 19200
 EMS_BOOT_WAIT_S = 12
 
-# Perceptible wiper range — 255 = minimum, 230 = first noticeable
-# Going lower than 200 risks too much intensity
+# Perceptible wiper range — 255 = minimum, 220 = max safe strong end
 WIPER_START = 255   # safe minimum — where board initializes
-WIPER_END   = 200   # lower = stronger, don't go too low
+WIPER_END   = 220   # lower = stronger, don't go too low
 DEFAULT_STEP = 5    # wiper steps per level (each w press = 1 step in firmware)
                     # we send multiple w presses to achieve larger steps
 
@@ -283,7 +282,7 @@ def wait_with_countdown(hold_s: float, label: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Step EMS wiper through perceptible range (255→200)"
+        description="Step EMS wiper through perceptible range (255→220)"
     )
     parser.add_argument("--ems", help="openEMSstim serial port e.g. /dev/tty.usbserial-210")
     parser.add_argument("--confirm", action="store_true",

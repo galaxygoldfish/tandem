@@ -97,7 +97,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     @Published var servoIntensity: Int = 50
 
     /// Upper bound (0…100) for openEMSstim intensity. Scales how far the wiper
-    /// moves toward the strong end (200); 100% = full perceptible range.
+    /// moves toward the strong end (220); 100% = full perceptible range.
     @Published var emsIntensity: Int = 50
 
     // MARK: - Rep Counter
@@ -119,9 +119,9 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     private var emsInitialized = false
     private var emsCurrentWiper = 255
     private var emsChannelActive = false
-    /// Wiper 255 = minimum perceptible; lower values = stronger (200 ≈ max safe).
+    /// Wiper 255 = minimum perceptible; lower values = stronger (220 ≈ max safe).
     private let emsWiperMin = 255
-    private let emsWiperMaxStrong = 200
+    private let emsWiperMaxStrong = 220
     private let emsWiperStepMax = 3
     private let sensoryThreshold = 0.3
 
@@ -327,9 +327,10 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
         }
     }
 
-    /// Map normalized activation to wiper position: 30% threshold → 255, 100% → 200.
+    /// Map normalized activation to wiper position: 30% threshold → 255, 100% → 220.
+    /// Slider at 0 = no stimulation (channel stays off).
     private func emsTargetWiper(for activation: Double) -> Int {
-        guard activation >= sensoryThreshold else { return emsWiperMin }
+        guard emsIntensity > 0, activation >= sensoryThreshold else { return emsWiperMin }
         let span = 1.0 - sensoryThreshold
         let t = max(0.0, min(1.0, (activation - sensoryThreshold) / span))
         let maxStrength = Double(max(0, min(emsIntensity, 100))) / 100.0
@@ -416,7 +417,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
             guard emsReady, emsInitialized else { return }
             let pct = Int((activation * 100).rounded())
             let targetWiper = emsTargetWiper(for: activation)
-            if activation >= sensoryThreshold {
+            if activation >= sensoryThreshold && emsIntensity > 0 {
                 emsSetChannelActive(true)
                 emsMoveWiper(toward: targetWiper)
                 logStim("activation=\(pct)%  wiper=\(emsCurrentWiper) → \(targetWiper)")
