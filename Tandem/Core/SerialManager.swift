@@ -113,7 +113,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
 
     // MARK: - OpenEMSstim (test-mode wiper commands: q/weaker, w/stronger, 1/toggle ch1)
     /// When true, output goes to openEMSstim (wchusbserial @ 19200) instead of the motor Arduino.
-    @Published var useOpenEMSstim = true
+    @Published var useOpenEMSstim = false
 
     private var emsReady = false
     private var emsInitialized = false
