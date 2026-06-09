@@ -95,7 +95,7 @@ class SerialManager: NSObject, ObservableObject, ORSSerialPortDelegate {
     
     /// Intensity level (0–100) set by the slider. Mapped to servo degrees as intensity/100 × 180.
     @Published var servoIntensity: Int = 50
-
+    
     /// Upper bound (0…100) for openEMSstim intensity. Scales how far the wiper
     /// moves toward the strong end (220); 100% = full perceptible range.
     @Published var emsIntensity: Int = 50

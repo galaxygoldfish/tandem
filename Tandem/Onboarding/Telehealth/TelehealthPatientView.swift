@@ -37,6 +37,7 @@ struct TelehealthPatientView: View {
             case .placement(let exercise):
                 TelehealthPlacementView(
                     exercise: exercise,
+                    role: .patient,
                     onContinue: {
                         placementAcknowledged = true
                         if calibrationReceived {

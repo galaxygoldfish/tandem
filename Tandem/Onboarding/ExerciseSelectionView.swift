@@ -59,6 +59,17 @@ struct ExerciseSelectionView: View {
             }
         }
 
+        /// Asset Catalog image shown on the therapist's placement screen — the
+        /// EMG sensor placement they wear to drive activation. Falls back to
+        /// the bicep image until artwork for the other exercises lands.
+        var therapistElectrodeImageName: String {
+            switch self {
+            case .bicepCurl:    return "BicepEMGElectrode"
+            case .shoulderShrug: return "BicepEMGElectrode"
+            case .wristFlex:    return "BicepEMGElectrode"
+            }
+        }
+
         /// Body part name used inline in the placement instructions copy.
         var bodyPart: String {
             switch self {

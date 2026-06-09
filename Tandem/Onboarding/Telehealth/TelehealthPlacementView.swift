@@ -1,13 +1,21 @@
 import SwiftUI
 
-/// Telehealth electrode placement screen. Therapist Mac fills the whole
-/// screen here (no patient pane beside it), so this view has more room.
-///
-/// Layout however you like — the `onContinue` callback advances the parent's
-/// flow into calibration.
+/// Telehealth electrode placement screen. Used on both ends of the call —
+/// the `role` switches the image (TENS vs EMG) and the status badge to match
+/// whose side this is being rendered on.
 struct TelehealthPlacementView: View {
+    enum Role { case patient, therapist }
+
     var exercise: ExerciseSelectionView.Exercise
+    var role: Role
     var onContinue: () -> Void
+
+    private var imageName: String {
+        switch role {
+        case .patient:   return exercise.patientElectrodeImageName
+        case .therapist: return exercise.therapistElectrodeImageName
+        }
+    }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -21,7 +29,7 @@ struct TelehealthPlacementView: View {
                 .foregroundStyle(.black.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            Image(exercise.patientElectrodeImageName)
+            Image(imageName)
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: 580, maxHeight: 460)
@@ -40,8 +48,10 @@ struct TelehealthPlacementView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .overlay(alignment: .bottomLeading) {
-            PatientUnitStatusBadge()
-                .padding(30)
+            switch role {
+            case .patient:   PatientUnitStatusBadge().padding(30)
+            case .therapist: TherapistUnitStatusBadge().padding(30)
+            }
         }
     }
 }
